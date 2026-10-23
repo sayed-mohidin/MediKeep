@@ -1,12 +1,17 @@
 import { describe, it, expect } from 'vitest';
 import {
-  buildOverview,
+  buildMetrics,
+  filterMetrics,
+  sortMetrics,
+  hasChanged,
   groupForTest,
   displayValue,
   observationDate,
   measurementKey,
   previousComparison,
   displayChange,
+  sourcePage,
+  displayPercent,
 } from './labOverview';
 import {
   getNavigationSections,
@@ -38,7 +43,7 @@ describe('historical comparisons', () => {
     expect(
       measurementKey({ ...current, canonical_test_name: 'Vitamin D (25-OH)' })
     ).toBe(measurementKey(previous));
-    expect(buildOverview([previous, current])[0].items).toHaveLength(1);
+    expect(buildMetrics([previous, current])).toHaveLength(1);
     expect(previousComparison([previous, current], current)).toMatchObject({
       previous,
       change: 10,
@@ -100,6 +105,10 @@ describe('historical comparisons', () => {
       percent: 50,
     });
     expect(displayChange(0.1 + 0.2)).toBe('+0.3');
+    expect(displayPercent(-3.31)).toBe('-3%');
+    expect(displayPercent(15.7)).toBe('+16%');
+    expect(displayPercent(0.4)).toBe('+<1%');
+    expect(displayPercent(0)).toBe('0%');
     expect(displayChange(-0.00001)).not.toBe('0');
   });
   it('handles zero baselines without infinite percentages and requires known units and dates', () => {
@@ -154,12 +163,10 @@ describe('lab overview grouping', () => {
     expect(groupForTest(row('Creatinine'))).toBe('kidney');
     expect(groupForTest(row('ALT (SGPT)'))).toBe('liver');
     expect(groupForTest(row('LDL/HDL Ratio'))).toBe('lipids');
-    expect(buildOverview([row('Unfamiliar enzyme')])[0].title).toBe(
-      'Other tests'
-    );
+    expect(buildMetrics([row('Unfamiliar enzyme')])[0].group).toBe('other');
   });
   it('selects the latest clinical date without replacing it with an import timestamp', () => {
-    const groups = buildOverview([
+    const metrics = buildMetrics([
       row('Creatinine', { value: 8, created_at: '2030-01-01' }),
       row('Creatinine', { id: 2, value: 9, completed_date: '2024-02-01' }),
       row('Creatinine', {
@@ -169,35 +176,106 @@ describe('lab overview grouping', () => {
         created_at: '2031-01-01',
       }),
     ]);
-    expect(groups[0].items).toHaveLength(1);
-    expect(groups[0].items[0].value).toBe(9);
+    expect(metrics).toHaveLength(1);
+    expect(metrics[0].latest.value).toBe(9);
+    expect(metrics[0].readings.at(-1).value).toBe(10);
     expect(
       observationDate(
         row('X', { completed_date: null, created_at: '2024-03-01' })
       )
     ).toBeNull();
   });
-  it('does not merge values in different units or erase zero values', () => {
-    const groups = buildOverview([
-      row('Creatinine', { value: 0 }),
-      row('Creatinine', { id: 2, unit: 'umol/L' }),
+  it('lists readings in other units under one test without comparing or plotting them', () => {
+    const metrics = buildMetrics([
+      row('Creatinine', { value: 0, completed_date: '2024-01-02' }),
+      row('Creatinine', {
+        id: 2,
+        unit: 'umol/L',
+        completed_date: '2024-02-02',
+      }),
       row('T3', { id: 3, unit: 'mIU/L' }),
       row('T3', { id: 4, unit: 'MIU/L' }),
     ]);
-    expect(groups.flatMap(group => group.items)).toHaveLength(4);
+    expect(metrics).toHaveLength(2);
+    const creatinine = metrics.find(m => m.latest.test_name === 'Creatinine');
+    expect(creatinine.latest.unit).toBe('umol/L');
+    expect(creatinine.readings.map(r => r.value)).toEqual([12, 0]);
+    expect(creatinine.otherUnits).toEqual(['mg/dL']);
+    expect(creatinine.comparison).toBeNull();
+    expect(creatinine.chartRows).toHaveLength(1);
     expect(displayValue(row('X', { value: 0 }))).toBe('0');
   });
   it('uses explicit flags and leaves missing reference guidance unclassified', () => {
-    const group = buildOverview([
+    const metrics = buildMetrics([
       row('Vitamin D', {
         status: null,
         ref_range_min: null,
         ref_range_max: null,
       }),
       row('Vitamin B12', { id: 2, status: 'low' }),
-    ])[0];
-    expect(group.flagged).toBe(1);
-    expect(group.items[0].status).toBeNull();
+    ]);
+    expect(metrics.filter(m => m.flagged)).toHaveLength(1);
+    expect(metrics.find(m => !m.flagged).latest.status).toBeNull();
+  });
+});
+describe('source pages', () => {
+  it('reads the page from import notes and ignores notes without one', () => {
+    expect(
+      sourcePage({ notes: 'Source: Paperless document 81, page 12. Checked.' })
+    ).toBe(12);
+    expect(sourcePage({ notes: 'Provisional result' })).toBeNull();
+    expect(sourcePage({ notes: null })).toBeNull();
+  });
+});
+describe('lab overview filtering', () => {
+  const metrics = buildMetrics([
+    row('HbA1c', {
+      value: 6,
+      unit: '%',
+      status: 'high',
+      completed_date: '2024-03-01',
+    }),
+    row('HbA1c', {
+      id: 2,
+      value: 5.9,
+      unit: '%',
+      completed_date: '2024-01-01',
+    }),
+    row('LDL Cholesterol', { id: 3, value: 100, completed_date: '2024-03-01' }),
+    row('LDL Cholesterol', { id: 4, value: 140, completed_date: '2024-01-01' }),
+    row('Glycosilated Haemoglobin HbA1c', {
+      id: 5,
+      canonical_test_name: 'Glucose random',
+    }),
+  ]);
+  const names = list => list.map(m => m.latest.test_name);
+  it('searches short names, source labels and panels', () => {
+    expect(names(filterMetrics(metrics, { query: 'ldl' }))).toEqual([
+      'LDL Cholesterol',
+    ]);
+    expect(names(filterMetrics(metrics, { query: 'cholesterol' }))).toEqual([
+      'LDL Cholesterol',
+    ]);
+    expect(names(filterMetrics(metrics, { query: 'lipids' }))).toEqual([
+      'LDL Cholesterol',
+    ]);
+    expect(filterMetrics(metrics, { query: '  ' })).toHaveLength(3);
+  });
+  it('filters by flag, change and panel', () => {
+    expect(names(filterMetrics(metrics, { filter: 'flagged' }))).toEqual([
+      'HbA1c',
+    ]);
+    expect(hasChanged(metrics.find(m => m.latest.test_name === 'HbA1c'))).toBe(
+      false
+    );
+    expect(names(filterMetrics(metrics, { filter: 'changed' }))).toEqual([
+      'LDL Cholesterol',
+    ]);
+    expect(filterMetrics(metrics, { filter: 'glucose' })).toHaveLength(2);
+  });
+  it('sorts by flag and by size of change', () => {
+    expect(names(sortMetrics(metrics, 'flagged'))[0]).toBe('HbA1c');
+    expect(names(sortMetrics(metrics, 'change'))[0]).toBe('LDL Cholesterol');
   });
 });
 describe('focused navigation', () => {

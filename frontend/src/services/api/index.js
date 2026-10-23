@@ -959,6 +959,16 @@ class ApiService {
     }
   }
 
+  // Inline view URL for a file. The HttpOnly cookie authenticates same-origin
+  // requests, so it works for window.open() and embedded frames alike.
+  getEntityFileViewUrl(fileId) {
+    const envBaseUrl = getApiUrl();
+    const baseUrl = envBaseUrl.endsWith('/api/v1')
+      ? envBaseUrl.slice(0, -7)
+      : envBaseUrl;
+    return `${baseUrl}/api/v1/entity-files/files/${fileId}/view`;
+  }
+
   // View file in new tab (generic - file ID is enough)
   async viewEntityFile(fileId, fileName, _signal) {
     try {
@@ -968,13 +978,7 @@ class ApiService {
         component: 'ApiService',
       });
 
-      // Construct view URL -- the HttpOnly cookie is sent automatically by the
-      // browser for same-origin requests opened via window.open().
-      const envBaseUrl = getApiUrl();
-      const baseUrl = envBaseUrl.endsWith('/api/v1')
-        ? envBaseUrl.slice(0, -7)
-        : envBaseUrl;
-      const viewUrl = `${baseUrl}/api/v1/entity-files/files/${fileId}/view`;
+      const viewUrl = this.getEntityFileViewUrl(fileId);
 
       const newWindow = window.open(viewUrl, '_blank', 'noopener,noreferrer');
 

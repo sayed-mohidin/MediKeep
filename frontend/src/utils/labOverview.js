@@ -1,56 +1,13 @@
 // Groups are presentation labels, not organ-health assessments. Unknown tests remain visible.
 export const OVERVIEW_GROUPS = [
-  {
-    id: 'blood',
-    title: 'Blood count',
-    short: 'CBC',
-    category: 'hematology',
-    highlights: ['total rbc count', 'hematocrit', 'haemoglobin', 'hemoglobin'],
-  },
-  {
-    id: 'glucose',
-    title: 'Glucose',
-    short: 'GLU',
-    highlights: [
-      'blood glucose fasting',
-      'fasting glucose',
-      'hba1c',
-      'glycosilated haemoglobin hba1c',
-    ],
-  },
-  {
-    id: 'lipids',
-    title: 'Lipids',
-    short: 'LIP',
-    category: 'lipids',
-    highlights: ['hdl cholesterol', 'ldl cholesterol', 'triglycerides'],
-  },
-  {
-    id: 'kidney',
-    title: 'Kidney markers',
-    short: 'REN',
-    highlights: ['creatinine', 'urea', 'blood urea nitrogen', 'egfr'],
-  },
-  {
-    id: 'liver',
-    title: 'Liver markers',
-    short: 'LFT',
-    category: 'hepatology',
-    highlights: ['alt sgpt', 'ast sgot', 'gamma gt'],
-  },
-  {
-    id: 'thyroid',
-    title: 'Thyroid',
-    short: 'TFT',
-    highlights: ['tsh', 't3', 't4'],
-  },
-  {
-    id: 'vitamins',
-    title: 'Vitamins',
-    short: 'VIT',
-    highlights: ['25 oh vitamin d', 'vitamin d', 'vitamin b12'],
-  },
-  { id: 'other', title: 'Other tests', short: 'LAB', highlights: [] },
+  { id: 'blood', title: 'Blood count' },
+  { id: 'glucose', title: 'Glucose' },
+  { id: 'lipids', title: 'Lipids' },
+  { id: 'kidney', title: 'Kidney markers' },
+  { id: 'liver', title: 'Liver markers' },
+  { id: 'thyroid', title: 'Thyroid' },
+  { id: 'vitamins', title: 'Vitamins' },
+  { id: 'other', title: 'Other tests' },
 ];
 export const normalizeTestName = value =>
   String(value || '')
@@ -147,6 +104,12 @@ export const displayChange = value =>
     maximumSignificantDigits: 3,
     signDisplay: 'exceptZero',
   });
+// Whole percentages read faster in a list; sub-1% moves keep their direction.
+export const displayPercent = value => {
+  const rounded = Math.round(value);
+  if (rounded === 0 && value !== 0) return value > 0 ? '+<1%' : '-<1%';
+  return `${rounded > 0 ? '+' : ''}${rounded}%`;
+};
 export function groupForTest(item) {
   const name = normalizeTestName(item.canonical_test_name || item.test_name);
   if (/\b(vitamin|b12|folate|folic)\b/.test(name)) return 'vitamins';
@@ -187,49 +150,113 @@ export function groupForTest(item) {
     return 'blood';
   return 'other';
 }
-export function buildOverview(components) {
-  const latest = new Map();
-  // Date-only strings sort without timezone conversion. Undated values do not borrow import dates.
+// One marker per test name and result type. Readings in other units stay in its history but are
+// never compared or plotted against it.
+export const markerKey = item =>
+  [
+    normalizeTestName(
+      isVitaminD25Oh(item)
+        ? VITAMIN_D25_OH
+        : item.canonical_test_name || item.test_name
+    ),
+    item.result_type || 'quantitative',
+  ].join('|');
+
+// Newest first. Undated readings sort last and do not borrow import dates.
+const newestFirst = (a, b) =>
+  (observationDate(b) || '').localeCompare(observationDate(a) || '') ||
+  Number(b.id) - Number(a.id);
+
+const isPlottable = row =>
+  !!observationDate(row) &&
+  !!comparisonUnit(row.unit) &&
+  typeof row.value === 'number' &&
+  Number.isFinite(row.value);
+
+export function buildMetrics(components) {
+  const byMarker = new Map();
   for (const item of components) {
-    const key = measurementKey(item);
-    const previous = latest.get(key);
-    const date = observationDate(item) || '';
-    const previousDate = previous ? observationDate(previous) || '' : '';
-    if (
-      !previous ||
-      date > previousDate ||
-      (date === previousDate && Number(item.id) > Number(previous.id))
-    )
-      latest.set(key, item);
+    const key = markerKey(item);
+    if (!byMarker.has(key)) byMarker.set(key, []);
+    byMarker.get(key).push(item);
   }
-  return OVERVIEW_GROUPS.map(group => {
-    const items = [...latest.values()].filter(
-      item => groupForTest(item) === group.id
+  return [...byMarker].map(([key, rows]) => {
+    const readings = [...rows].sort(newestFirst);
+    const latest = readings[0];
+    const sameUnit = readings.filter(
+      row => measurementKey(row) === measurementKey(latest)
     );
-    const rank = item => {
-      const name = normalizeTestName(
-        isVitaminD25Oh(item) ? '25 OH Vitamin D' : item.test_name
-      );
-      const i = group.highlights.indexOf(name);
-      return i < 0 ? 100 : i;
-    };
-    const highlights = [...items]
-      .sort(
-        (a, b) =>
-          rank(a) - rank(b) ||
-          Number(isFlagged(b)) - Number(isFlagged(a)) ||
-          a.test_name.localeCompare(b.test_name)
-      )
-      .slice(0, 3);
-    const dates = items.map(observationDate).filter(Boolean).sort();
+    const latestUnit = comparisonUnit(latest.unit);
     return {
-      ...group,
-      items,
-      highlights,
-      flagged: items.filter(isFlagged).length,
-      latestDate: dates.at(-1) || null,
+      key,
+      latest,
+      readings,
+      group: groupForTest(latest),
+      flagged: isFlagged(latest),
+      comparison: previousComparison(sameUnit, latest),
+      chartRows: sameUnit.filter(isPlottable).reverse(),
+      otherUnits: [
+        ...new Set(
+          readings
+            .map(row => comparisonUnit(row.unit))
+            .filter(unit => unit && unit !== latestUnit)
+        ),
+      ],
     };
-  }).filter(group => group.items.length);
+  });
+}
+
+// "Changed" means at least 5% since the previous comparable reading.
+export const CHANGE_THRESHOLD = 5;
+export const hasChanged = metric =>
+  !!metric.comparison &&
+  (metric.comparison.percent === null
+    ? metric.comparison.change !== 0
+    : Math.abs(metric.comparison.percent) >= CHANGE_THRESHOLD);
+
+export function matchesQuery(metric, query) {
+  const q = normalizeTestName(query);
+  if (!q) return true;
+  const group = OVERVIEW_GROUPS.find(g => g.id === metric.group);
+  return [
+    summaryTestName(metric.latest),
+    group?.title,
+    ...metric.readings.flatMap(row => [row.test_name, row.canonical_test_name]),
+  ].some(text => normalizeTestName(text).includes(q));
+}
+
+export function filterMetrics(metrics, { query = '', filter = 'all' } = {}) {
+  return metrics.filter(
+    metric =>
+      matchesQuery(metric, query) &&
+      (filter === 'all' ||
+        (filter === 'flagged'
+          ? metric.flagged
+          : filter === 'changed'
+            ? hasChanged(metric)
+            : metric.group === filter))
+  );
+}
+
+const byName = (a, b) =>
+  summaryTestName(a.latest).localeCompare(summaryTestName(b.latest));
+const groupRank = metric =>
+  OVERVIEW_GROUPS.findIndex(group => group.id === metric.group);
+export const SORTS = {
+  group: (a, b) => groupRank(a) - groupRank(b) || byName(a, b),
+  flagged: (a, b) => Number(b.flagged) - Number(a.flagged) || byName(a, b),
+  change: (a, b) =>
+    Math.abs(b.comparison?.percent ?? 0) -
+      Math.abs(a.comparison?.percent ?? 0) || byName(a, b),
+  name: byName,
+};
+export const sortMetrics = (metrics, sort = 'group') =>
+  [...metrics].sort(SORTS[sort] || SORTS.group);
+
+// Imported readings record where they were read from, e.g. "Source: Paperless document 81, page 2."
+export function sourcePage(item) {
+  const match = /\bpage (\d+)\b/i.exec(item.notes || '');
+  return match ? Number(match[1]) : null;
 }
 export function displayValue(item) {
   if (item.value !== null && item.value !== undefined)
@@ -245,7 +272,7 @@ export function displayReference(item) {
   return 'Not provided';
 }
 
-// Short labels belong only to summary cards; detail views retain the source test names.
+// Short labels belong only to list rows; detail views retain the source test names.
 export function summaryTestName(item) {
   if (isVitaminD25Oh(item)) return VITAMIN_D25_OH;
   const labels = {

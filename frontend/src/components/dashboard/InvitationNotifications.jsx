@@ -36,7 +36,7 @@ import { useCacheManager, useCurrentPatient } from '../../hooks/useGlobalData';
 import logger from '../../services/logger';
 import { timezoneService } from '../../services/timezoneService';
 
-const InvitationNotifications = () => {
+const InvitationNotifications = ({ hideWhenEmpty = false }) => {
   const { t } = useTranslation(['navigation', 'common', 'shared']);
   const { formatDateTime } = useDateFormat();
   const { colorScheme } = useMantineColorScheme();
@@ -188,6 +188,9 @@ const InvitationNotifications = () => {
   const handleInvitationUpdate = () => {
     loadPendingInvitations();
   };
+
+  // Callers that only want to surface pending invitations render nothing otherwise.
+  if (hideWhenEmpty && pendingInvitations.length === 0) return null;
 
   if (loading && !lastUpdate) {
     return (
