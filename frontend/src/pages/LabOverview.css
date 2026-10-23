@@ -17,14 +17,21 @@
 .lab-card {
   break-inside: avoid;
   margin-bottom: 14px;
-  padding: 14px 6px 8px;
+  padding: 0 6px 8px;
+  overflow: hidden;
+  border-top: 3px solid var(--lab-accent);
 }
 .lab-card-head {
   display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 0 10px 8px;
+  align-items: center;
+  gap: 12px;
+  margin: 0 -6px 4px;
+  padding: 14px 16px 12px;
+  background: linear-gradient(to bottom, var(--lab-accent-tint), transparent);
+}
+.lab-card-title {
+  flex: 1;
+  min-width: 0;
 }
 .lab-test-row {
   display: grid;

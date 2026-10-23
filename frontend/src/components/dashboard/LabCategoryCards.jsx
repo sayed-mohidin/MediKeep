@@ -4,11 +4,20 @@ import {
   Button,
   Paper,
   Text,
+  ThemeIcon,
   Tooltip,
   UnstyledButton,
 } from '@mantine/core';
 import {
+  IconButterfly,
+  IconCandy,
   IconChevronRight,
+  IconDroplet,
+  IconFilter,
+  IconHeartbeat,
+  IconLeaf,
+  IconSun,
+  IconTestPipe,
   IconTrendingDown,
   IconTrendingUp,
 } from '@tabler/icons-react';
@@ -23,6 +32,18 @@ import {
   summaryTestName,
 } from '../../utils/labOverview';
 import StatusFlag from './StatusFlag';
+
+// Decorative identity per category; colours stay clear of the yellow/red used for flags.
+const CARD_THEMES = {
+  blood: { icon: IconDroplet, color: 'red' },
+  glucose: { icon: IconCandy, color: 'orange' },
+  lipids: { icon: IconHeartbeat, color: 'pink' },
+  kidney: { icon: IconFilter, color: 'violet' },
+  liver: { icon: IconLeaf, color: 'teal' },
+  thyroid: { icon: IconButterfly, color: 'indigo' },
+  vitamins: { icon: IconSun, color: 'lime' },
+  other: { icon: IconTestPipe, color: 'gray' },
+};
 
 // Long panels (a full blood count has 20+ tests) start collapsed to the most relevant rows.
 const COLLAPSED_ROWS = 5;
@@ -83,6 +104,7 @@ function CategoryCard({ group, metrics, showAll, onOpen, dateLabel }) {
     showAll || expanded ? ordered : ordered.slice(0, COLLAPSED_ROWS);
   const hidden = ordered.length - visible.length;
   const flagged = metrics.filter(metric => metric.flagged).length;
+  const theme = CARD_THEMES[group.id] || CARD_THEMES.other;
   const cardDate = metrics
     .map(metric => observationDate(metric.latest))
     .filter(Boolean)
@@ -95,9 +117,22 @@ function CategoryCard({ group, metrics, showAll, onOpen, dateLabel }) {
       className="lab-card"
       component="section"
       aria-label={group.title}
+      style={{
+        '--lab-accent': `var(--mantine-color-${theme.color}-6)`,
+        '--lab-accent-tint': `var(--mantine-color-${theme.color}-light)`,
+      }}
     >
       <div className="lab-card-head">
-        <div>
+        <ThemeIcon
+          variant="light"
+          color={theme.color}
+          size={38}
+          radius="md"
+          aria-hidden
+        >
+          <theme.icon size={20} stroke={1.8} />
+        </ThemeIcon>
+        <div className="lab-card-title">
           <Text fw={700}>{group.title}</Text>
           <Text size="xs" c="dimmed">
             {metrics.length} {metrics.length === 1 ? 'test' : 'tests'}
