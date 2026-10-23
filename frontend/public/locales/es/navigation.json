@@ -118,5 +118,10 @@
       "misc": "Varios",
       "tools": "Herramientas"
     }
+  },
+  "labOverview": {
+    "navigation": "Salud",
+    "overview": "Resumen",
+    "moreRecords": "Más registros"
   }
 }

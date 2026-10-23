@@ -118,5 +118,10 @@
       "misc": "Divers",
       "tools": "Outils"
     }
+  },
+  "labOverview": {
+    "navigation": "Santé",
+    "overview": "Aperçu",
+    "moreRecords": "Autres dossiers"
   }
 }

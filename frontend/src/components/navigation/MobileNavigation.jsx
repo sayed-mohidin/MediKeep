@@ -61,25 +61,41 @@ const MobileNavigation = ({
             </button>
           )}
 
-          {Object.entries(navigationSections).map(([key, section]) => (
-            <div key={key} className="mobile-nav-section">
-              <h4 className="mobile-section-title">
-                {section.titleKey
-                  ? t(section.titleKey, section.title)
-                  : section.title}
-              </h4>
-              {section.items.map(item => (
-                <button
-                  key={item.id}
-                  className={`mobile-nav-item ${isCurrentPath(item.path) ? 'active' : ''}`}
-                  onClick={() => handleNavigation(item.path)}
+          {Object.entries(navigationSections).map(([key, section]) => {
+            const links = section.items.map(item => (
+              <button
+                key={item.id}
+                className={`mobile-nav-item ${isCurrentPath(item.path) ? 'active' : ''}`}
+                onClick={() => handleNavigation(item.path)}
+              >
+                {item.icon} {t(item.nameKey, item.name)}
+              </button>
+            ));
+            const title = t(section.titleKey, section.title);
+            return section.collapsible ? (
+              <details
+                key={key}
+                className="mobile-nav-section"
+                open={
+                  section.items.some(item => isCurrentPath(item.path)) ||
+                  undefined
+                }
+              >
+                <summary
+                  className="mobile-section-title"
+                  style={{ cursor: 'pointer', padding: '12px 0' }}
                 >
-                  {item.icon}{' '}
-                  {item.nameKey ? t(item.nameKey, item.name) : item.name}
-                </button>
-              ))}
-            </div>
-          ))}
+                  {title}
+                </summary>
+                {links}
+              </details>
+            ) : (
+              <div key={key} className="mobile-nav-section">
+                <h4 className="mobile-section-title">{title}</h4>
+                {links}
+              </div>
+            );
+          })}
 
           <div className="mobile-nav-section">
             <h4 className="mobile-section-title">

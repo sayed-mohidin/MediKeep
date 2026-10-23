@@ -118,5 +118,10 @@
       "misc": "Διάφορα",
       "tools": "Εργαλεία"
     }
+  },
+  "labOverview": {
+    "navigation": "Υγεία",
+    "overview": "Επισκόπηση",
+    "moreRecords": "Περισσότερα αρχεία"
   }
 }

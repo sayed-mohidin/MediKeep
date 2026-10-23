@@ -1,758 +1,417 @@
-import { vi } from 'vitest';
-
-/**
- * @jest-environment jsdom
- */
 import {
   render,
   screen,
   fireEvent,
   waitFor,
-  act,
+  within,
 } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
 import { MantineProvider } from '@mantine/core';
+import { MemoryRouter } from 'react-router-dom';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import Dashboard from './Dashboard';
-import { apiService } from '../services/api';
-import frontendLogger from '../services/frontendLogger';
-import AuthContext from '../contexts/AuthContext';
-import { UserPreferencesProvider } from '../contexts/UserPreferencesContext';
-import { useCurrentPatient } from '../hooks/useGlobalData';
-
-// Mock dependencies
-vi.mock('../services/api');
-vi.mock('../services/frontendLogger');
+const mocks = vi.hoisted(() => ({
+  patient: { id: 10 },
+  data: null,
+  setPatient: vi.fn(),
+  invalidate: vi.fn(),
+  getFiles: vi.fn(),
+  vitals: [],
+  unitSystem: 'metric',
+}));
 vi.mock('../hooks/useGlobalData', () => ({
-  useCurrentPatient: vi.fn(),
-  useCacheManager: vi.fn(() => ({
-    invalidatePatient: vi.fn(),
-    refreshPatient: vi.fn(),
-    invalidateAll: vi.fn(),
-    setCurrentPatient: vi.fn(),
-  })),
+  useCurrentPatient: () => ({ patient: mocks.patient, loading: false }),
+  useCacheManager: () => ({
+    setCurrentPatient: mocks.setPatient,
+    invalidateAll: mocks.invalidate,
+  }),
 }));
-vi.mock('../components/medical', () => ({
-  PatientSelector: ({ onPatientChange: _onPatientChange, currentPatientId }) => (
-    <div data-testid="patient-selector">
-      <span data-testid="current-patient-id">{currentPatientId}</span>
-    </div>
+vi.mock('../hooks/useLabOverview', () => ({
+  useLabOverview: () => mocks.data,
+}));
+vi.mock('../hooks/useBodyMeasures', () => ({
+  useBodyMeasures: () => ({ readings: mocks.vitals, error: false }),
+}));
+vi.mock('../contexts/UserPreferencesContext', () => ({
+  useUserPreferences: () => ({ unitSystem: mocks.unitSystem }),
+}));
+vi.mock('../hooks/useDateFormat', () => ({
+  useDateFormat: () => ({ formatDate: value => value }),
+}));
+vi.mock('../components/layout/PageHeader', () => ({
+  default: () => <header>MediKeep</header>,
+}));
+vi.mock('../components/medical/PatientSelector', () => ({
+  default: ({ onPatientChange }) => (
+    <button onClick={() => onPatientChange({ id: 20 })}>Switch patient</button>
   ),
 }));
-vi.mock('../components/common', () => ({
-  GlobalSearch: ({ patientId: _patientId, placeholder }) => (
-    <input data-testid="global-search" placeholder={placeholder} />
-  ),
+vi.mock('../components/dashboard/InvitationNotifications', () => ({
+  default: () => null,
 }));
-vi.mock('../components/dashboard', () => ({
-  InvitationNotifications: () => <div data-testid="invitation-notifications" />,
-}));
-vi.mock('../components', () => ({
-  PageHeader: ({ title, icon, variant, showBackButton }) => (
-    <div data-testid="page-header">
-      <span data-testid="header-title">{title}</span>
-      <span data-testid="header-icon">{icon}</span>
-      <span data-testid="header-variant">{variant}</span>
-      <span data-testid="show-back-button">{showBackButton?.toString()}</span>
-    </div>
-  ),
-}));
-
-// Mock services
-vi.mock('../services/logger', () => ({
-  default: {
-    info: vi.fn(),
-    error: vi.fn(),
-    warn: vi.fn(),
+vi.mock('../services/api', () => ({
+  apiService: {
+    getEntityFiles: (...args) => mocks.getFiles(...args),
+    getEntityFileViewUrl: id => `/api/v1/entity-files/files/${id}/view`,
   },
 }));
-
-// Mock react-router-dom navigate
-const mockNavigate = vi.fn();
-vi.mock('react-router-dom', async () => ({
-  ...(await vi.importActual('react-router-dom')),
-  useNavigate: () => mockNavigate,
-}));
-
-// Mock localStorage
-const localStorageMock = (() => {
-  let store = {};
-  return {
-    getItem: vi.fn(key => store[key] || null),
-    setItem: vi.fn((key, value) => {
-      store[key] = value.toString();
-    }),
-    removeItem: vi.fn(key => {
-      delete store[key];
-    }),
-    clear: vi.fn(() => {
-      store = {};
-    }),
-  };
-})();
-Object.defineProperty(window, 'localStorage', { value: localStorageMock });
-
-// Mock atob for JWT decoding
-global.atob = vi.fn(str => {
-  try {
-    return Buffer.from(str, 'base64').toString('binary');
-  } catch {
-    return '{}';
-  }
-});
-
-// Test utilities
-const createMockAuthContext = (overrides = {}) => ({
-  user: { id: 1, username: 'testuser', role: 'user' },
-  isAuthenticated: true,
-  isLoading: false,
-  shouldShowProfilePrompts: vi.fn(() => false),
-  checkIsFirstLogin: vi.fn(() => false),
-  ...overrides,
-});
-
-const createMockPatientData = (overrides = {}) => ({
+// Most tests look at every test; the key-marker tests use keyWrapper.
+const wrapper = ({ children }) => (
+  <MemoryRouter initialEntries={['/dashboard?view=all']}>
+    <MantineProvider>{children}</MantineProvider>
+  </MemoryRouter>
+);
+const keyWrapper = ({ children }) => (
+  <MemoryRouter initialEntries={['/dashboard']}>
+    <MantineProvider>{children}</MantineProvider>
+  </MemoryRouter>
+);
+const alt = (extra = {}) => ({
   id: 1,
-  first_name: 'John',
-  last_name: 'Doe',
-  birth_date: '1990-01-01',
-  gender: 'M',
-  address: '123 Test St',
-  ...overrides,
+  lab_result_id: 40,
+  test_name: 'ALT (SGPT)',
+  value: 10,
+  unit: 'U/L',
+  category: 'hepatology',
+  completed_date: '2024-01-02',
+  ref_range_text: '0 - 30',
+  status: 'normal',
+  ...extra,
 });
-
-const renderDashboard = (authContextValue = null, patientData = null) => {
-  const defaultAuthContext = createMockAuthContext();
-  const mockAuthContext = authContextValue || defaultAuthContext;
-
-  const defaultPatientData = createMockPatientData();
-  const mockPatientHook = {
-    patient: patientData || defaultPatientData,
+function fixture() {
+  return {
     loading: false,
+    reports: [
+      { id: 40, patient_id: 10, test_name: 'January panel' },
+      { id: 41, patient_id: 10, test_name: 'December panel' },
+    ],
+    components: [
+      alt(),
+      {
+        id: 2,
+        lab_result_id: 40,
+        test_name: 'Novel assay',
+        value: 0,
+        unit: null,
+        completed_date: null,
+        status: null,
+      },
+    ],
+    refresh: vi.fn(),
+    error: null,
   };
-
-  useCurrentPatient.mockReturnValue(mockPatientHook);
-
-  return render(
-    <MemoryRouter>
-      <MantineProvider>
-        <AuthContext.Provider value={mockAuthContext}>
-          <UserPreferencesProvider>
-            <Dashboard />
-          </UserPreferencesProvider>
-        </AuthContext.Provider>
-      </MantineProvider>
-    </MemoryRouter>
-  );
+}
+const row = name =>
+  screen.getByRole('button', { name: `Open ${name} history` });
+const openTest = async name => {
+  fireEvent.click(row(name));
+  return screen.findByRole('dialog');
 };
-
-describe('Dashboard Component', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    localStorageMock.clear();
-
-    // Default API mocks
-    apiService.getRecentActivity.mockResolvedValue([]);
-    apiService.getDashboardStats.mockResolvedValue({
-      total_records: 10,
-      active_medications: 5,
-      total_lab_results: 8,
-      total_procedures: 3,
-    });
-
-    // Mock JWT token for admin check
-    localStorageMock.getItem.mockImplementation(key => {
-      if (key === 'token') {
-        // Mock JWT with user role
-        const payload = { role: 'user' };
-        const encodedPayload = btoa(JSON.stringify(payload));
-        return `header.${encodedPayload}.signature`;
-      }
-      return null;
-    });
+const previewFrom = (panel, date) =>
+  fireEvent.click(
+    within(panel).getByRole('button', { name: `Preview report from ${date}` })
+  );
+beforeEach(() => {
+  localStorage.clear();
+  mocks.vitals = [];
+  mocks.unitSystem = 'metric';
+  mocks.patient = { id: 10 };
+  mocks.data = fixture();
+  mocks.getFiles.mockReset();
+  mocks.getFiles.mockResolvedValue([
+    { id: 50, file_name: 'report.pdf', file_type: 'application/pdf' },
+  ]);
+});
+describe('health overview cards', () => {
+  it('separates tests into category cards and opens a test in one panel', async () => {
+    render(<Dashboard />, { wrapper });
+    const liver = screen.getByRole('region', { name: 'Liver markers' });
+    expect(within(liver).getByText('ALT')).toBeInTheDocument();
+    expect(within(liver).getByText('1 test · 2024-01-02')).toBeInTheDocument();
+    expect(
+      screen.getByRole('region', { name: 'Other tests' })
+    ).toBeInTheDocument();
+    expect(screen.queryByText('0 - 30')).not.toBeInTheDocument();
+    const panel = await openTest('ALT');
+    expect(within(panel).getByText('0 - 30')).toBeInTheDocument();
+    expect(within(panel).getByText('January panel')).toBeInTheDocument();
   });
-
-  /**
-   * The 30s activity poll and the mount/patient-change loads share one
-   * fetchRecentActivity. A 401 must eject on the latter and be swallowed on the
-   * former, so only the timer may declare itself unattended. This used to be
-   * decided by matching the request URL, which exempted all three.
-   */
-  describe('Background poll declaration', () => {
-    it('does not declare the mount load as background', async () => {
-      renderDashboard();
-
-      await waitFor(() => {
-        expect(apiService.getRecentActivity).toHaveBeenCalled();
-      });
-
-      const [, , options] = apiService.getRecentActivity.mock.calls[0];
-      expect(options?.background).toBeFalsy();
-    });
-
-    it('declares the 30s interval as background', async () => {
-      vi.useFakeTimers({ shouldAdvanceTime: true });
-      try {
-        renderDashboard();
-
-        await waitFor(() => {
-          expect(apiService.getRecentActivity).toHaveBeenCalled();
-        });
-        apiService.getRecentActivity.mockClear();
-
-        await act(async () => {
-          vi.advanceTimersByTime(30000);
-        });
-
-        expect(apiService.getRecentActivity).toHaveBeenCalledWith(
-          expect.anything(),
-          null,
-          expect.objectContaining({ background: true })
-        );
-      } finally {
-        vi.useRealTimers();
-      }
-    });
+  it('shows unfamiliar tests, zeros and unspecified dates without inventing statuses', async () => {
+    render(<Dashboard />, { wrapper });
+    const panel = await openTest('Novel assay');
+    expect(within(panel).getByText('Not provided')).toBeInTheDocument();
+    expect(
+      within(panel).getAllByText(/Date not recorded/).length
+    ).toBeGreaterThan(0);
+    expect(screen.queryByText('Normal')).not.toBeInTheDocument();
   });
-
-  describe('Rendering and Layout', () => {
-    it('renders dashboard with correct structure', async () => {
-      await act(async () => {
-        renderDashboard();
-      });
-
-      await waitFor(() => {
-        expect(screen.getByTestId('page-header')).toBeInTheDocument();
-        expect(screen.getByTestId('header-title')).toHaveTextContent(
-          'MediKeep'
-        );
-        expect(screen.getByTestId('header-icon')).toBeInTheDocument();
-        expect(screen.getByTestId('header-variant')).toHaveTextContent(
-          'dashboard'
-        );
-        expect(screen.getByTestId('show-back-button')).toHaveTextContent(
-          'false'
-        );
-      });
-    });
-
-    it('displays welcome box by default', async () => {
-      await act(async () => {
-        renderDashboard();
-      });
-
-      await waitFor(() => {
-        expect(screen.getByText(/medikeep dashboard/i)).toBeInTheDocument();
-        expect(
-          screen.getByText(/manage your health information securely/i)
-        ).toBeInTheDocument();
-        expect(screen.getByText(/hello/i)).toBeInTheDocument();
-      });
-    });
-
-    it('displays dashboard stats cards', async () => {
-      await act(async () => {
-        renderDashboard();
-      });
-
-      await waitFor(() => {
-        expect(screen.getByText('Total Records')).toBeInTheDocument();
-        expect(screen.getByText('Active Medications')).toBeInTheDocument();
-        expect(screen.getAllByText('Lab Results')).toHaveLength(2); // One in stats, one in modules
-        expect(screen.getAllByText('Procedures')).toHaveLength(2); // One in stats, one in modules
-        expect(screen.getByText('10')).toBeInTheDocument();
-        expect(screen.getByText('5')).toBeInTheDocument();
-        expect(screen.getByText('8')).toBeInTheDocument();
-        expect(screen.getByText('3')).toBeInTheDocument();
-      });
-    });
-
-    it('displays all module sections', async () => {
-      await act(async () => {
-        renderDashboard();
-      });
-
-      await waitFor(() => {
-        expect(
-          screen.getByText('Core Medical Information')
-        ).toBeInTheDocument();
-        expect(
-          screen.getByText('Treatments and Procedures')
-        ).toBeInTheDocument();
-        expect(screen.getByText('Health Monitoring')).toBeInTheDocument();
-        expect(screen.getByText('Prevention & History')).toBeInTheDocument();
-        expect(screen.getByText('Additional Resources')).toBeInTheDocument();
-      });
-    });
-
-    it('displays search bar', async () => {
-      await act(async () => {
-        renderDashboard();
-      });
-
-      await waitFor(() => {
-        const searchInput = screen.getByTestId('global-search');
-        expect(searchInput).toBeInTheDocument();
-      });
-    });
+  it('shows the change since the previous reading in the same unit only', async () => {
+    mocks.data.components = [
+      alt(),
+      alt({ id: 3, lab_result_id: 41, value: 8, completed_date: '2023-12-01' }),
+      alt({ id: 4, value: 900, unit: 'mg/dL', completed_date: '2023-12-20' }),
+    ];
+    render(<Dashboard />, { wrapper });
+    expect(within(row('ALT')).getByText('+25%')).toBeInTheDocument();
+    const panel = await openTest('ALT');
+    expect(
+      within(panel).getByText(/Also recorded in mg\/dL/)
+    ).toBeInTheDocument();
   });
-
-  describe('Loading States', () => {
-    it('shows loading screen when patient data is loading', async () => {
-      useCurrentPatient.mockReturnValue({
-        patient: null,
-        loading: true,
-      });
-      // Keep activity loading to prevent initialLoadComplete from becoming true
-      apiService.getRecentActivity.mockImplementation(
-        () => new Promise(() => {})
-      );
-
-      await act(async () => {
-        renderDashboard();
-      });
-
-      expect(
-        screen.getByText('Loading your medical dashboard...')
-      ).toBeInTheDocument();
-    });
-
-    it('shows loading screen when activity is loading', async () => {
-      apiService.getRecentActivity.mockImplementation(
-        () => new Promise(() => {})
-      );
-
-      await act(async () => {
-        renderDashboard();
-      });
-
-      expect(
-        screen.getByText('Loading your medical dashboard...')
-      ).toBeInTheDocument();
-    });
-
-    it('shows loading screen when stats are loading', async () => {
-      apiService.getDashboardStats.mockImplementation(
-        () => new Promise(() => {})
-      );
-
-      await act(async () => {
-        renderDashboard();
-      });
-
-      expect(
-        screen.getByText('Loading your medical dashboard...')
-      ).toBeInTheDocument();
-    });
+  it('shows only the most relevant rows of a long card until expanded', () => {
+    mocks.data.components = Array.from({ length: 7 }, (_, i) =>
+      alt({
+        id: i + 1,
+        test_name: `Liver enzyme ${i + 1}`,
+        status: i === 6 ? 'high' : 'normal',
+      })
+    ).map(item => ({ ...item, test_name: `Bilirubin ${item.id}` }));
+    render(<Dashboard />, { wrapper });
+    const liver = screen.getByRole('region', { name: 'Liver markers' });
+    expect(
+      within(liver).getAllByRole('button', { name: /^Open/ })
+    ).toHaveLength(5);
+    expect(
+      within(liver).getByRole('button', { name: 'Open Bilirubin 7 history' })
+    ).toBeInTheDocument();
+    fireEvent.click(within(liver).getByRole('button', { name: 'Show 2 more' }));
+    expect(
+      within(liver).getAllByRole('button', { name: /^Open/ })
+    ).toHaveLength(7);
   });
-
-  describe('API Integration', () => {
-    it('fetches recent activity on mount', async () => {
-      await act(async () => {
-        renderDashboard();
-      });
-
-      await waitFor(() => {
-        expect(apiService.getRecentActivity).toHaveBeenCalled();
-      });
+  it('filters with search and chips, and offers a way back from no results', () => {
+    mocks.data.components = [
+      alt({ status: 'high' }),
+      {
+        ...alt(),
+        id: 5,
+        test_name: 'Vitamin B12',
+        unit: 'pg/ml',
+        category: null,
+      },
+    ];
+    render(<Dashboard />, { wrapper });
+    fireEvent.click(screen.getByRole('button', { name: /Flagged/ }));
+    expect(row('ALT')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('region', { name: 'Vitamins' })
+    ).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Search tests'), {
+      target: { value: 'b12' },
     });
-
-    it('fetches dashboard stats on mount', async () => {
-      await act(async () => {
-        renderDashboard();
-      });
-
-      await waitFor(() => {
-        expect(apiService.getDashboardStats).toHaveBeenCalled();
-      });
+    expect(
+      screen.getByText('No tests match these filters.')
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
+    expect(row('Vitamin B12')).toBeInTheDocument();
+    expect(row('ALT')).toBeInTheDocument();
+  });
+  it('merges the two vitamin D labels into one test and keeps each report label', async () => {
+    const base = { lab_result_id: 40, unit: 'ng/ml', status: null };
+    mocks.data.components = [
+      {
+        ...base,
+        id: 1,
+        test_name: '25 OH Vitamin D',
+        value: 50,
+        completed_date: '2024-03-01',
+      },
+      {
+        ...base,
+        id: 2,
+        test_name: '25 OH Vitamin D',
+        value: 40,
+        completed_date: '2024-02-01',
+      },
+      {
+        ...base,
+        id: 3,
+        test_name: 'VITAMIN D-T (25-OH)',
+        value: 777,
+        completed_date: '2024-01-01',
+      },
+    ];
+    render(<Dashboard />, { wrapper });
+    expect(screen.getAllByRole('button', { name: /Vitamin D/ })).toHaveLength(
+      1
+    );
+    const panel = await openTest('Vitamin D (25-OH)');
+    expect(
+      within(panel).getAllByRole('button', { name: /Preview report/ })
+    ).toHaveLength(3);
+    expect(within(panel).getByText('777 ng/ml')).toBeInTheDocument();
+  });
+  it('previews the original report on its page, steps to older readings and returns', async () => {
+    mocks.data.components = [
+      alt({ notes: 'Source: Paperless document 81, page 2. Checked.' }),
+      alt({ id: 3, lab_result_id: 41, value: 8, completed_date: '2023-12-01' }),
+    ];
+    render(<Dashboard />, { wrapper });
+    const panel = await openTest('ALT');
+    previewFrom(panel, '2024-01-02');
+    expect(within(panel).getByText(/January panel/)).toBeInTheDocument();
+    expect(within(panel).getByText('· 2 of 2')).toBeInTheDocument();
+    expect(within(panel).getByText('Page 2')).toBeInTheDocument();
+    const frame = await within(panel).findByTitle('report.pdf');
+    expect(frame).toHaveAttribute(
+      'src',
+      '/api/v1/entity-files/files/50/view#page=2'
+    );
+    expect(mocks.getFiles).toHaveBeenCalledWith(
+      'lab-result',
+      40,
+      expect.any(AbortSignal)
+    );
+    fireEvent.click(within(panel).getByRole('button', { name: 'Older' }));
+    expect(
+      await within(panel).findByText(/December panel/)
+    ).toBeInTheDocument();
+    expect(within(panel).getByRole('button', { name: 'Older' })).toBeDisabled();
+    await waitFor(() =>
+      expect(mocks.getFiles).toHaveBeenCalledWith(
+        'lab-result',
+        41,
+        expect.any(AbortSignal)
+      )
+    );
+    fireEvent.click(
+      within(panel).getByRole('button', { name: 'Back to history' })
+    );
+    expect(
+      within(panel).getAllByRole('button', { name: /Preview report/ })
+    ).toHaveLength(2);
+  });
+  it('offers to open the PDF when the browser cannot show it inline', async () => {
+    Object.defineProperty(navigator, 'pdfViewerEnabled', {
+      value: false,
+      configurable: true,
     });
-
-    it('handles API errors gracefully for recent activity', async () => {
-      const errorMessage = 'Failed to fetch activity';
-      apiService.getRecentActivity.mockRejectedValue(new Error(errorMessage));
-
-      await act(async () => {
-        renderDashboard();
-      });
-
-      await waitFor(() => {
-        expect(frontendLogger.logError).toHaveBeenCalledWith(
-          'Error fetching activity',
-          expect.objectContaining({
-            error: errorMessage,
-            component: 'Dashboard',
-          })
-        );
-      });
-    });
-
-    it('handles API errors gracefully for dashboard stats', async () => {
-      const errorMessage = 'Failed to fetch stats';
-      apiService.getDashboardStats.mockRejectedValue(new Error(errorMessage));
-
-      await act(async () => {
-        renderDashboard();
-      });
-
-      await waitFor(() => {
-        expect(frontendLogger.logError).toHaveBeenCalledWith(
-          'Error fetching dashboard stats',
-          expect.objectContaining({
-            error: errorMessage,
-            component: 'Dashboard',
-          })
-        );
-      });
-
-      // Should display fallback stats - there are multiple 0s so check for presence
-      await waitFor(() => {
-        expect(screen.getAllByText('0')).toHaveLength(4); // Four stat cards with 0
-      });
-    });
-
-    it('displays recent activity when available', async () => {
-      const mockActivity = [
-        {
-          description: 'Added new medication: Aspirin',
-          timestamp: '2023-12-01T10:30:00Z',
-        },
-        {
-          description: 'Updated lab results',
-          timestamp: '2023-12-01T09:15:00Z',
-        },
+    try {
+      mocks.data.components = [
+        alt({ notes: 'Source: Paperless document 81, page 3.' }),
       ];
-      apiService.getRecentActivity.mockResolvedValue(mockActivity);
-
-      await act(async () => {
-        renderDashboard();
+      render(<Dashboard />, { wrapper });
+      const panel = await openTest('ALT');
+      previewFrom(panel, '2024-01-02');
+      const open = await within(panel).findByRole('link', {
+        name: 'Open report.pdf (page 3)',
       });
-
-      await waitFor(() => {
-        expect(
-          screen.getByText('Added new medication: Aspirin')
-        ).toBeInTheDocument();
-        expect(screen.getByText('Updated lab results')).toBeInTheDocument();
-      });
-    });
-
-    it('displays no activity message when activity list is empty', async () => {
-      apiService.getRecentActivity.mockResolvedValue([]);
-
-      await act(async () => {
-        renderDashboard();
-      });
-
-      await waitFor(() => {
-        expect(screen.getByText('No recent activity')).toBeInTheDocument();
-      });
-    });
-  });
-
-  describe('Navigation', () => {
-    it('navigates to correct routes when module cards are clicked', async () => {
-      await act(async () => {
-        renderDashboard();
-      });
-
-      await waitFor(() => {
-        const patientInfoCard = screen.getByText('Patient Information');
-        fireEvent.click(patientInfoCard);
-        expect(mockNavigate).toHaveBeenCalledWith('/patients/me');
-      });
-
-      const medicationsCard = screen.getByText('Medications');
-      fireEvent.click(medicationsCard);
-      expect(mockNavigate).toHaveBeenCalledWith('/medications');
-
-      // Get the Lab Results card from the modules section (not stats)
-      // Module cards render before stats cards in the DOM, so index [0] is the module card
-      const labResultsCards = screen.getAllByText('Lab Results');
-      fireEvent.click(labResultsCards[0]); // Click the module card (rendered before stat card)
-      expect(mockNavigate).toHaveBeenCalledWith('/lab-results');
-    });
-
-    it('navigates when additional resource items are clicked', async () => {
-      await act(async () => {
-        renderDashboard();
-      });
-
-      await waitFor(() => {
-        const emergencyContactsItem = screen.getByText('Emergency Contacts');
-        fireEvent.click(emergencyContactsItem);
-        expect(mockNavigate).toHaveBeenCalledWith('/emergency-contacts');
-      });
-
-      const exportItem = screen.getByText('Export Records');
-      fireEvent.click(exportItem);
-      expect(mockNavigate).toHaveBeenCalledWith('/export');
-    });
-  });
-
-  describe('Admin Features', () => {
-    it('shows admin dashboard for admin users', async () => {
-      // Admin status is derived from AuthContext user.role (populated from
-      // /users/me), NOT from a client-side JWT decode — the cookie-auth flow
-      // puts the token in an HttpOnly cookie that JS cannot read.
-      const adminAuthContext = createMockAuthContext({
-        user: { id: 1, username: 'admin', role: 'admin' },
-      });
-
-      await act(async () => {
-        renderDashboard(adminAuthContext);
-      });
-
-      await waitFor(
-        () => {
-          expect(screen.getByText('Admin Dashboard')).toBeInTheDocument();
-        },
-        { timeout: 3000 }
+      expect(open).toHaveAttribute(
+        'href',
+        '/api/v1/entity-files/files/50/view#page=3'
       );
-    });
-
-    it('does not show admin dashboard for regular users', async () => {
-      await act(async () => {
-        renderDashboard();
-      });
-
-      await waitFor(() => {
-        expect(screen.queryByText('Admin Dashboard')).not.toBeInTheDocument();
-      });
-    });
-
-    it('does not show admin dashboard when authUser is null', async () => {
-      // Regression for the initial auth-loading state — if AuthContext has
-      // not resolved yet, the admin button must not render (fail closed).
-      const unauthContext = createMockAuthContext({
-        user: null,
-        isAuthenticated: false,
-      });
-
-      await act(async () => {
-        renderDashboard(unauthContext);
-      });
-
-      await waitFor(() => {
-        expect(screen.queryByText('Admin Dashboard')).not.toBeInTheDocument();
-        expect(screen.getByTestId('page-header')).toBeInTheDocument();
-      });
-    });
+      expect(within(panel).queryByTitle('report.pdf')).not.toBeInTheDocument();
+    } finally {
+      delete navigator.pdfViewerEnabled;
+    }
   });
-
-  describe('Profile Completion Modal', () => {
-    it.skip('shows profile modal for first-time users with incomplete profiles', async () => {
-      // TODO: profile completion modal not yet implemented in Dashboard component
-      const mockAuthContext = createMockAuthContext({
-        checkIsFirstLogin: vi.fn(() => true),
-        shouldShowProfilePrompts: vi.fn(() => true),
-      });
-
-      await act(async () => {
-        renderDashboard(mockAuthContext);
-      });
-
-      await waitFor(
-        () => {
-          expect(
-            screen.getByTestId('profile-completion-modal')
-          ).toBeInTheDocument();
-        },
-        { timeout: 2000 }
-      );
-    });
-
-    it('does not show profile modal for returning users', async () => {
-      const mockAuthContext = createMockAuthContext({
-        checkIsFirstLogin: vi.fn(() => false),
-        shouldShowProfilePrompts: vi.fn(() => false),
-      });
-
-      await act(async () => {
-        renderDashboard(mockAuthContext);
-      });
-
-      await waitFor(() => {
-        expect(
-          screen.queryByTestId('profile-completion-modal')
-        ).not.toBeInTheDocument();
-      });
-    });
-
-    it.skip('closes profile modal when close button is clicked', async () => {
-      // TODO: profile completion modal not yet implemented in Dashboard component
-      const mockAuthContext = createMockAuthContext({
-        checkIsFirstLogin: vi.fn(() => true),
-        shouldShowProfilePrompts: vi.fn(() => true),
-      });
-
-      await act(async () => {
-        renderDashboard(mockAuthContext);
-      });
-
-      await waitFor(
-        () => {
-          expect(
-            screen.getByTestId('profile-completion-modal')
-          ).toBeInTheDocument();
-        },
-        { timeout: 2000 }
-      );
-
-      const closeButton = screen.getByText('Close');
-      fireEvent.click(closeButton);
-
-      await waitFor(() => {
-        expect(
-          screen.queryByTestId('profile-completion-modal')
-        ).not.toBeInTheDocument();
-      });
-    });
+  it('closes the open test immediately when the patient changes', async () => {
+    const view = render(<Dashboard />, { wrapper });
+    await openTest('ALT');
+    mocks.patient = { id: 20 };
+    mocks.data = { ...fixture(), reports: [], components: [], loading: true };
+    view.rerender(<Dashboard />);
+    await waitFor(() =>
+      expect(screen.queryByText('0 - 30')).not.toBeInTheDocument()
+    );
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    );
+    expect(
+      screen.getByText('Loading this patient’s results…')
+    ).toBeInTheDocument();
   });
-
-  describe('Welcome Box', () => {
-    it('can be dismissed and persists dismissal in localStorage', async () => {
-      const mockAuthContext = createMockAuthContext({
-        user: { id: 123, username: 'testuser' },
-      });
-
-      await act(async () => {
-        renderDashboard(mockAuthContext);
-      });
-
-      await waitFor(() => {
-        expect(screen.getByText(/medikeep dashboard/i)).toBeInTheDocument();
-      });
-
-      const closeButton = screen.getByTitle('Close welcome message');
-      fireEvent.click(closeButton);
-
-      await waitFor(() => {
-        expect(
-          screen.queryByText(/medikeep dashboard/i)
-        ).not.toBeInTheDocument();
-        expect(localStorageMock.setItem).toHaveBeenCalledWith(
-          'welcomeBox_dismissed_123',
-          'true'
-        );
-      });
-    });
-
-    it('respects previously dismissed state from localStorage', async () => {
-      const mockAuthContext = createMockAuthContext({
-        user: { id: 123, username: 'testuser' },
-      });
-      localStorageMock.getItem.mockImplementation(key => {
-        if (key === 'welcomeBox_dismissed_123') return 'true';
-        return null;
-      });
-
-      await act(async () => {
-        renderDashboard(mockAuthContext);
-      });
-
-      await waitFor(() => {
-        expect(
-          screen.queryByText(/medikeep dashboard/i)
-        ).not.toBeInTheDocument();
-      });
-    });
+  it('distinguishes an empty library from API failure and retries', () => {
+    mocks.data = { ...fixture(), components: [], reports: [] };
+    const view = render(<Dashboard />, { wrapper });
+    expect(
+      screen.getByText('No measurements imported yet')
+    ).toBeInTheDocument();
+    mocks.data = {
+      ...fixture(),
+      components: [],
+      error: 'Could not load this patient’s test results. Please retry.',
+    };
+    view.rerender(<Dashboard />);
+    expect(screen.getByText('Results unavailable')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(mocks.data.refresh).toHaveBeenCalled();
   });
-
-  describe('Search Functionality', () => {
-    it('updates search query when typing in search input', async () => {
-      await act(async () => {
-        renderDashboard();
-      });
-
-      await waitFor(() => {
-        const searchInput = screen.getByTestId('global-search');
-        fireEvent.change(searchInput, { target: { value: 'medications' } });
-        expect(searchInput.value).toBe('medications');
-      });
-    });
+});
+describe('key markers and body card', () => {
+  const ast = (extra = {}) => alt({ id: 7, test_name: 'AST (SGOT)', ...extra });
+  it('shows only key markers and flagged tests until expanded', () => {
+    mocks.data.components = [
+      alt(),
+      ast(),
+      alt({ id: 8, test_name: 'Bilirubin Total', status: 'high' }),
+    ];
+    render(<Dashboard />, { wrapper: keyWrapper });
+    const liver = screen.getByRole('region', { name: 'Liver markers' });
+    expect(
+      within(liver).getByText('2 of 3 tests · 2024-01-02')
+    ).toBeInTheDocument();
+    expect(row('ALT')).toBeInTheDocument();
+    expect(row('Bilirubin Total')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Open AST history' })
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('region', { name: 'Other tests' })
+    ).not.toBeInTheDocument();
+    fireEvent.click(within(liver).getByRole('button', { name: 'Show 1 more' }));
+    expect(row('AST')).toBeInTheDocument();
   });
-
-  describe('Error Handling', () => {
-    it('handles missing patient data gracefully', async () => {
-      useCurrentPatient.mockReturnValue({
-        patient: null,
-        loading: false,
-      });
-
-      await act(async () => {
-        renderDashboard();
-      });
-
-      await waitFor(() => {
-        // Should still render dashboard structure
-        expect(screen.getByTestId('page-header')).toBeInTheDocument();
-        // Welcome box should not crash without patient data
-        expect(screen.queryByText('Hello, null null!')).not.toBeInTheDocument();
-      });
+  it('searching finds tests outside the key markers', () => {
+    mocks.data.components = [alt(), ast()];
+    render(<Dashboard />, { wrapper: keyWrapper });
+    fireEvent.change(screen.getByLabelText('Search tests'), {
+      target: { value: 'sgot' },
     });
-
-    it('handles missing auth user gracefully', async () => {
-      const mockAuthContext = createMockAuthContext({ user: null });
-
-      await act(async () => {
-        renderDashboard(mockAuthContext);
-      });
-
-      await waitFor(() => {
-        expect(screen.getByTestId('page-header')).toBeInTheDocument();
-      });
-    });
+    expect(row('AST')).toBeInTheDocument();
   });
-
-  describe('Module Cards', () => {
-    it('renders all core medical information modules', async () => {
-      await act(async () => {
-        renderDashboard();
-      });
-
-      await waitFor(
-        () => {
-          expect(screen.getByText('Patient Information')).toBeInTheDocument();
-          expect(screen.getByText('Medications')).toBeInTheDocument();
-          expect(screen.getAllByText('Lab Results')).toHaveLength(2); // One in stats, one in modules
-        },
-        { timeout: 2000 }
-      );
-    });
-
-    it('renders all treatment modules', async () => {
-      await act(async () => {
-        renderDashboard();
-      });
-
-      await waitFor(
-        () => {
-          expect(screen.getByText('Treatments')).toBeInTheDocument();
-          expect(screen.getAllByText('Procedures')).toHaveLength(2); // One in stats, one in modules
-        },
-        { timeout: 2000 }
-      );
-    });
-
-    it('renders all monitoring modules', async () => {
-      await act(async () => {
-        renderDashboard();
-      });
-
-      await waitFor(() => {
-        expect(screen.getByText('Vital Signs')).toBeInTheDocument();
-        expect(screen.getByText('Conditions')).toBeInTheDocument();
-        expect(screen.getByText('Allergies')).toBeInTheDocument();
-      });
-    });
-
-    it('renders all prevention modules', async () => {
-      await act(async () => {
-        renderDashboard();
-      });
-
-      await waitFor(() => {
-        expect(screen.getByText('Immunizations')).toBeInTheDocument();
-        expect(screen.getByText('Visit History')).toBeInTheDocument();
-      });
-    });
+  it('pins and unpins tests for this patient', async () => {
+    mocks.data.components = [alt(), ast()];
+    render(<Dashboard />, { wrapper: keyWrapper });
+    fireEvent.click(screen.getByRole('button', { name: 'Show 1 more' }));
+    const panel = await openTest('AST');
+    fireEvent.click(
+      within(panel).getByRole('button', { name: 'Add to Key markers' })
+    );
+    expect(
+      within(panel).getByRole('button', { name: 'Remove from Key markers' })
+    ).toBeInTheDocument();
+    expect(localStorage.setItem).toHaveBeenCalledWith(
+      'medikeep.keyMarkers.10',
+      expect.stringContaining('"pinned":["ast sgot|quantitative"]')
+    );
+  });
+  it('invites adding weight and height when Vitals are empty', () => {
+    render(<Dashboard />, { wrapper: keyWrapper });
+    const card = screen.getByRole('region', { name: 'Body' });
+    expect(
+      within(card).getByText(/Add your weight and height/)
+    ).toBeInTheDocument();
+    expect(
+      within(card).getByRole('link', { name: 'Add in Vitals' })
+    ).toHaveAttribute('href', '/vitals');
+  });
+  it('shows BMI from the latest weight and height in the preferred units', () => {
+    mocks.vitals = [
+      { id: 1, recorded_date: '2024-01-01T08:00:00', weight: 165, height: 70 },
+      {
+        id: 2,
+        recorded_date: '2024-03-01T08:00:00',
+        weight: 160,
+        systolic_bp: 118,
+        diastolic_bp: 76,
+      },
+    ];
+    render(<Dashboard />, { wrapper: keyWrapper });
+    const card = screen.getByRole('region', { name: 'Body' });
+    expect(within(card).getByText('23')).toBeInTheDocument();
+    expect(within(card).getByText('Healthy range')).toBeInTheDocument();
+    expect(within(card).getByText('72.6')).toBeInTheDocument();
+    expect(within(card).getByText('-2.2 kg')).toBeInTheDocument();
+    expect(within(card).getByText('118/76')).toBeInTheDocument();
   });
 });

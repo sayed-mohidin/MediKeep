@@ -1,986 +1,344 @@
-import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useTranslation } from 'react-i18next';
+import { useCallback, useMemo, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
-  Container,
-  Grid,
-  Card,
-  Text,
-  Title,
-  Group,
-  Stack,
-  Badge,
   ActionIcon,
+  Alert,
+  Button,
+  Container,
+  Group,
+  Loader,
   Paper,
-  SimpleGrid,
-  ThemeIcon,
-  Progress,
-  Box,
-  Flex,
+  SegmentedControl,
+  Stack,
+  Text,
+  TextInput,
+  Title,
   Tooltip,
-  useMantineColorScheme,
 } from '@mantine/core';
 import {
-  IconStethoscope,
+  IconArrowDown,
+  IconArrowUp,
   IconFlask,
-  IconPill,
-  IconHeartbeat,
-  IconVaccine,
-  IconClipboardList,
-  IconAlertTriangle,
-  IconBrain,
-  IconMedicalCross,
-  IconCalendarEvent,
-  IconFileExport,
-  IconUser,
-  IconBuilding,
-  IconSettings,
-  IconChevronRight,
-  IconAlertCircle,
+  IconInfoCircle,
+  IconTrendingUp,
+  IconRefresh,
+  IconSearch,
   IconX,
-  IconPhoneCall,
-  IconUsers,
-  IconShield,
-  IconBandage,
-  IconDeviceDesktop,
 } from '@tabler/icons-react';
-import { PageHeader } from '../components';
-import { PatientSelector } from '../components/medical';
-import { GlobalSearch } from '../components/common';
-import { InvitationNotifications } from '../components/dashboard';
-import { apiService } from '../services/api';
-import frontendLogger from '../services/frontendLogger';
-import logger from '../services/logger';
-import { timezoneService } from '../services/timezoneService';
-import { useAuth } from '../contexts/AuthContext';
-import { isUserAdmin } from '../utils/authUtils';
-import { useViewport } from '../hooks/useViewport';
+import PageHeader from '../components/layout/PageHeader';
+import PatientSelector from '../components/medical/PatientSelector';
+import InvitationNotifications from '../components/dashboard/InvitationNotifications';
+import BodyCard from '../components/dashboard/BodyCard';
+import LabCategoryCards from '../components/dashboard/LabCategoryCards';
+import TestDrawer from '../components/dashboard/TestDrawer';
 import { useCurrentPatient, useCacheManager } from '../hooks/useGlobalData';
 import { useDateFormat } from '../hooks/useDateFormat';
+import { useBodyMeasures } from '../hooks/useBodyMeasures';
+import { useLabOverview } from '../hooks/useLabOverview';
+import { usePinnedMarkers } from '../hooks/usePinnedMarkers';
 import {
-  getActivityNavigationUrl,
-  getActivityIcon,
-  getActionBadgeColor,
-  getActionIcon,
-  formatActivityDescription,
-  isActivityClickable,
-  getActivityTooltip,
-} from '../utils/activityNavigation';
+  buildMetrics,
+  filterMetrics,
+  hasChanged,
+  isKeyMarker,
+  observationDate,
+} from '../utils/labOverview';
+import './LabOverview.css';
 
-const Dashboard = () => {
-  const navigate = useNavigate();
-  const { t } = useTranslation(['navigation', 'common', 'shared']);
-  const { formatDateTime } = useDateFormat();
-  const { colorScheme } = useMantineColorScheme();
-  const { isMobile } = useViewport();
-  const { user: authUser } = useAuth();
+const HOW_TO_READ =
+  'Key markers shows the tests most often followed in routine check-ups, plus anything flagged; star a test to add or remove it. Everything shows every test. Flags come from the labels or ranges recorded in the report and are not a clinical assessment. Changes compare against the previous dated reading in the same unit, without rescaling.';
 
-  // Using global state for patient data
-  const { patient: currentPatient, loading: patientLoading } =
-    useCurrentPatient();
-  const { refreshPatient, invalidateAll, setCurrentPatient } =
-    useCacheManager();
+export default function Dashboard() {
+  const {
+    patient,
+    loading: patientLoading,
+    error: patientError,
+  } = useCurrentPatient();
+  const { setCurrentPatient, invalidateAll } = useCacheManager();
+  const { formatDate } = useDateFormat();
+  const patientId = patient?.id || null;
+  const data = useLabOverview(patientId);
+  const [params, setParams] = useSearchParams();
+  const query = params.get('q') || '';
+  const filter = params.get('filter') || 'all';
+  const view = params.get('view') === 'all' ? 'all' : 'key';
+  const body = useBodyMeasures(patientId);
+  const { isPinned, setPinned } = usePinnedMarkers(patientId);
+  // The open test belongs to one patient and is dropped on switch.
+  const [open, setOpen] = useState(null);
 
-  const [recentActivity, setRecentActivity] = useState([]);
-  const [activityLoading, setActivityLoading] = useState(true);
-  const [dashboardStats, setDashboardStats] = useState(null);
-  const [statsLoading, setStatsLoading] = useState(true);
-  // Admin status is derived from AuthContext user (populated from /users/me),
-  // not decoded client-side from the JWT — the cookie-auth flow stores the
-  // token in an HttpOnly cookie that JS cannot read.
-  const isAdmin = isUserAdmin(authUser);
-  const [patientSelectorLoading, setPatientSelectorLoading] = useState(false);
-  const [initialLoadComplete, setInitialLoadComplete] = useState(false);
-  const [lastActivityUpdate, setLastActivityUpdate] = useState(null);
-  const [showWelcomeBox, setShowWelcomeBox] = useState(() => {
-    // Check if user has dismissed the welcome box for this user
-    const dismissed = localStorage.getItem(
-      `welcomeBox_dismissed_${authUser?.id || 'guest'}`
+  const metrics = useMemo(
+    () => buildMetrics(data.components),
+    [data.components]
+  );
+  const visible = useMemo(
+    () => filterMetrics(metrics, { query, filter }),
+    [metrics, query, filter]
+  );
+  const activeOpen = open?.patientId === patientId ? open : null;
+  const openMetric = activeOpen
+    ? metrics.find(metric => metric.key === activeOpen.key)
+    : null;
+  const filtering = !!query.trim() || filter !== 'all';
+  const isDefaultKey = metric => isKeyMarker(metric.latest);
+  // Flagged results always stay visible in the trimmed view.
+  const isPrimary = metric =>
+    metric.flagged || isPinned(metric.key, isDefaultKey(metric));
+  const latestDate = metrics
+    .map(metric => observationDate(metric.latest))
+    .filter(Boolean)
+    .sort()
+    .at(-1);
+  const dateLabel = useCallback(
+    value => (value ? formatDate(value) : 'Date not recorded'),
+    [formatDate]
+  );
+
+  const chips = [
+    { id: 'all', label: 'All', count: metrics.length },
+    {
+      id: 'flagged',
+      label: 'Flagged',
+      count: metrics.filter(m => m.flagged).length,
+    },
+    {
+      id: 'changed',
+      label: 'Changed',
+      count: metrics.filter(hasChanged).length,
+    },
+  ];
+
+  function setParam(key, value, fallback) {
+    setParams(
+      previous => {
+        const next = new URLSearchParams(previous);
+        if (value && value !== fallback) next.set(key, value);
+        else next.delete(key);
+        return next;
+      },
+      { replace: true }
     );
-    return dismissed !== 'true';
-  });
-
-  // Combine loading states - only show full loading screen during initial load
-  const loading =
-    (patientLoading || activityLoading || statsLoading) && !initialLoadComplete;
-
-  useEffect(() => {
-    const loadInitialData = async () => {
-      await Promise.all([fetchRecentActivity(), fetchDashboardStats()]);
-      setInitialLoadComplete(true);
-    };
-    loadInitialData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- initial load runs once on mount; fetchers are stable in component scope
-  }, []);
-
-  // Note: currentPatient is now managed by useCurrentPatient hook
-  // No need for local state management
-
-  // Refresh dashboard stats when active patient changes
-  useEffect(() => {
-    if (currentPatient?.id && initialLoadComplete) {
-      fetchDashboardStats();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only re-fetch on patient/load state change; fetchDashboardStats is stable in component scope
-  }, [currentPatient?.id, initialLoadComplete]);
-
-  // Refresh recent activity when active patient changes
-  useEffect(() => {
-    if (currentPatient?.id && initialLoadComplete) {
-      fetchRecentActivity();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only re-fetch on patient/load state change; fetchRecentActivity is stable in component scope
-  }, [currentPatient?.id, initialLoadComplete]);
-
-  // Auto-refresh recent activity every 30 seconds to catch new updates
-  useEffect(() => {
-    const interval = setInterval(() => {
-      // The only unattended caller. The mount load and the patient-change
-      // effect below share this function and must still eject on a 401.
-      fetchRecentActivity(null, { background: true });
-    }, 30000); // 30 seconds
-
-    return () => clearInterval(interval);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- restart interval only when patient changes; fetchRecentActivity is stable in component scope
-  }, [currentPatient]);
-
-  useEffect(() => {
-    if (authUser && currentPatient) {
-      // Reset welcome box for new user login (different user)
-      const currentUserId = authUser.id;
-      const dismissed = localStorage.getItem(
-        `welcomeBox_dismissed_${currentUserId}`
-      );
-      setShowWelcomeBox(dismissed !== 'true');
-    }
-  }, [authUser, currentPatient]);
-
-  const handlePatientChange = async newPatient => {
-    // Prevent infinite loops by checking if patient actually changed
-    if (currentPatient?.id === newPatient?.id) {
-      return;
-    }
-
-    frontendLogger.logInfo('Patient switched from dashboard', {
-      component: 'Dashboard',
-      newPatientId: newPatient?.id,
-      patientName: newPatient
-        ? `${newPatient.first_name} ${newPatient.last_name}`
-        : null,
-    });
-
-    // Show loading state for patient selector during switch
-    setPatientSelectorLoading(true);
-
-    // Update local state
-    setCurrentPatient(newPatient);
-
-    // Invalidate all caches to force refresh of all medical data for new patient
-    invalidateAll();
-    refreshPatient();
-
-    // Dashboard data will be refreshed automatically by useEffect when currentPatient changes
-
-    // Hide loading state
-    setPatientSelectorLoading(false);
-  };
-
-  const fetchRecentActivity = async (patientId = null, { background } = {}) => {
-    try {
-      setActivityLoading(true);
-      const targetPatientId = patientId || currentPatient?.id;
-      const activity = await apiService.getRecentActivity(
-        targetPatientId,
-        null,
-        { background }
-      );
-
-      // Filter out erroneous "deleted" patient information activities
-      // This is a temporary fix for a backend issue where patient updates are logged as deletions
-      const filteredActivity = activity.filter(item => {
-        const isPatientModel = item.model_name
-          ?.toLowerCase()
-          .includes('patient');
-        const isDeletedAction = item.action?.toLowerCase() === 'deleted';
-
-        // Exclude deleted patient information activities (backend logging error)
-        if (isPatientModel && isDeletedAction) {
-          return false;
-        }
-
-        return true;
-      });
-
-      setRecentActivity(filteredActivity);
-      setLastActivityUpdate(new Date());
-    } catch (error) {
-      frontendLogger.logError('Error fetching activity', {
-        error: error.message,
-        component: 'Dashboard',
-      });
-    } finally {
-      setActivityLoading(false);
-    }
-  };
-
-  const fetchDashboardStats = async () => {
-    try {
-      setStatsLoading(true);
-      const patientId = currentPatient?.id;
-      const stats = await apiService.getDashboardStats(patientId);
-      setDashboardStats(stats);
-    } catch (error) {
-      frontendLogger.logError('Error fetching dashboard stats', {
-        error: error.message,
-        component: 'Dashboard',
-        patientId: currentPatient?.id,
-      });
-      // Set fallback stats on error
-      setDashboardStats({
-        total_records: 0,
-        active_medications: 0,
-        total_lab_results: 0,
-        total_procedures: 0,
-      });
-    } finally {
-      setStatsLoading(false);
-    }
-  };
-
-  // Dashboard stats data - using real data from API
-  const dashboardStatsCards = [
-    {
-      label: t('shared:labels.totalRecords', 'Total Records'),
-      value: dashboardStats?.total_records?.toString() || '0',
-      color: 'blue',
-    },
-    {
-      label: t('dashboard.stats.activeMedications', 'Active Medications'),
-      value: dashboardStats?.active_medications?.toString() || '0',
-      color: 'green',
-    },
-    {
-      label: t('shared:categories.lab_results', 'Lab Results'),
-      value: dashboardStats?.total_lab_results?.toString() || '0',
-      color: 'orange',
-    },
-    {
-      label: t('shared:categories.procedures', 'Procedures'),
-      value: dashboardStats?.total_procedures?.toString() || '0',
-      color: 'violet',
-    },
-  ];
-
-  // Core medical modules - organized in 2x2 grid sections like the schematic
-  const coreModules = [
-    {
-      title: t('shared:labels.patientInformation', 'Patient Information'),
-      icon: IconUser,
-      color: 'blue',
-      link: '/patients/me',
-    },
-    {
-      title: t('shared:categories.medications', 'Medications'),
-      icon: IconPill,
-      color: 'green',
-      link: '/medications',
-    },
-    {
-      title: t('shared:categories.lab_results', 'Lab Results'),
-      icon: IconFlask,
-      color: 'teal',
-      link: '/lab-results',
-    },
-  ];
-
-  const treatmentModules = [
-    {
-      title: t('shared:categories.treatments', 'Treatments'),
-      icon: IconClipboardList,
-      color: 'cyan',
-      link: '/treatments',
-    },
-    {
-      title: t('shared:categories.procedures', 'Procedures'),
-      icon: IconMedicalCross,
-      color: 'indigo',
-      link: '/procedures',
-    },
-  ];
-
-  const monitoringModules = [
-    {
-      title: t('shared:categories.vital_signs', 'Vital Signs'),
-      icon: IconHeartbeat,
-      color: 'red',
-      link: '/vitals',
-    },
-    {
-      title: t('shared:categories.symptoms', 'Symptoms'),
-      icon: IconStethoscope,
-      color: 'blue',
-      link: '/symptoms',
-    },
-    {
-      title: t('shared:categories.conditions', 'Conditions'),
-      icon: IconBrain,
-      color: 'pink',
-      link: '/conditions',
-    },
-    {
-      title: t('shared:categories.allergies', 'Allergies'),
-      icon: IconAlertTriangle,
-      color: 'orange',
-      link: '/allergies',
-    },
-    {
-      title: t('shared:categories.injuries', 'Injuries'),
-      icon: IconBandage,
-      color: 'red',
-      link: '/injuries',
-    },
-  ];
-
-  const preventionModules = [
-    {
-      title: t('shared:categories.immunizations', 'Immunizations'),
-      icon: IconVaccine,
-      color: 'violet',
-      link: '/immunizations',
-    },
-    {
-      title: t('dashboard.modules.visitHistory', 'Visit History'),
-      icon: IconCalendarEvent,
-      color: 'yellow',
-      link: '/visits',
-    },
-    {
-      title: t('shared:categories.family_history', 'Family History'),
-      icon: IconUsers,
-      color: 'grape',
-      link: '/family-history',
-    },
-  ];
-
-  // Additional resources
-  const additionalModules = [
-    {
-      title: t('shared:categories.insurance', 'Insurance'),
-      icon: IconShield,
-      color: 'violet',
-      link: '/insurance',
-    },
-    {
-      title: t('shared:categories.emergency_contacts', 'Emergency Contacts'),
-      icon: IconPhoneCall,
-      color: 'red',
-      link: '/emergency-contacts',
-    },
-    {
-      title: t('dashboard.modules.exportRecords', 'Export Records'),
-      icon: IconFileExport,
-      color: 'violet',
-      link: '/export',
-    },
-    {
-      title: t('shared:categories.practitioners', 'Practitioners'),
-      icon: IconUser,
-      color: 'blue',
-      link: '/practitioners',
-    },
-    {
-      title: t('shared:categories.pharmacies', 'Pharmacies'),
-      icon: IconBuilding,
-      color: 'green',
-      link: '/pharmacies',
-    },
-    {
-      title: t('shared:categories.medical_equipment', 'Medical Equipment'),
-      icon: IconDeviceDesktop,
-      color: 'orange',
-      link: '/medical-equipment',
-    },
-  ];
-
-  // Add admin dashboard if user is admin
-  if (isAdmin) {
-    additionalModules.unshift({
-      title: t('shared:categories.admin_dashboard', 'Admin Dashboard'),
-      icon: IconSettings,
-      color: 'indigo',
-      link: '/admin',
-    });
   }
-
-  const StatsRow = props => (
-    <SimpleGrid cols={{ base: 2, sm: 4 }} spacing={12} {...props}>
-      {dashboardStatsCards.map((stat, index) => (
-        <StatCard key={index} stat={stat} />
-      ))}
-    </SimpleGrid>
+  function clearFilters() {
+    setParams(
+      previous => {
+        const next = new URLSearchParams(previous);
+        next.delete('q');
+        next.delete('filter');
+        return next;
+      },
+      { replace: true }
+    );
+  }
+  const showPreview = useCallback(
+    index => setOpen(current => current && { ...current, previewIndex: index }),
+    []
   );
-
-  const StatCard = ({ stat }) => (
-    <Paper
-      className={`dashboard-stat-card ${stat.color}`}
-      withBorder
-      radius="md"
-      p="md"
-      h={90}
-    >
-      <Stack align="center" justify="center" h="100%">
-        <Text
-          size={isMobile ? '18px' : '22px'}
-          fw={700}
-          c={colorScheme === 'dark' ? `${stat.color}.3` : stat.color}
-        >
-          {stat.value}
-        </Text>
-        <Text size="12px" c="dimmed" ta="center">
-          {stat.label}
-        </Text>
-      </Stack>
-    </Paper>
-  );
-
-  const ModuleCard = ({ module }) => {
-    const Icon = module.icon;
-
-    const handleClick = _e => {
-      logger.info('ModuleCard clicked:', module.link);
-      try {
-        navigate(module.link);
-      } catch (error) {
-        logger.error('Navigation error:', error);
-        frontendLogger.logError('Navigation error from ModuleCard', {
-          error: error.message,
-          component: 'Dashboard',
-          link: module.link,
-        });
-      }
-    };
-
-    return (
-      <Paper
-        className={`dashboard-module-card ${module.color}`}
-        withBorder
-        radius="md"
-        role="button"
-        tabIndex={0}
-        onClick={handleClick}
-        onKeyDown={e => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            handleClick(e);
-          }
-        }}
-      >
-        <Flex direction="column" justify="center" align="center" h="100%">
-          <Box
-            className="icon-circle"
-            mb="xs"
-            style={{ background: `var(--mantine-color-${module.color}-light)` }}
-          >
-            <Icon
-              size={20}
-              color={`var(--mantine-color-${module.color}-filled)`}
-            />
-          </Box>
-          <Text size="13px" fw={600} ta="center">
-            {module.title}
-          </Text>
-        </Flex>
-      </Paper>
-    );
-  };
-
-  const ActivityItem = ({ activity, index: _index }) => {
-    const isClickable = isActivityClickable(activity);
-    const navigationUrl = getActivityNavigationUrl(activity);
-    const ActivityIcon = getActivityIcon(activity.model_name);
-    const ActionIcon = getActionIcon(activity.action);
-    const actionColor = getActionBadgeColor(activity.action);
-    const tooltip = getActivityTooltip(activity);
-    const formattedDescription = formatActivityDescription(activity);
-    const actionDisplayName = t(
-      `activity.actions.${activity.action?.toLowerCase()}`,
-      activity.action
-    );
-
-    const handleClick = _e => {
-      if (isClickable && navigationUrl) {
-        navigate(navigationUrl);
-        frontendLogger.logInfo('Activity item clicked', {
-          component: 'Dashboard',
-          activity_id: activity.id,
-          model_name: activity.model_name,
-          action: activity.action,
-          navigation_url: navigationUrl,
-        });
-      }
-    };
-
-    return (
-      <Tooltip label={tooltip} position="left" disabled={!tooltip}>
-        <Paper
-          className={isClickable ? 'dashboard-activity-item' : undefined}
-          p={isMobile ? '8px 10px' : '10px 12px'}
-          radius="sm"
-          withBorder
-          style={{
-            cursor: isClickable ? 'pointer' : 'default',
-          }}
-          styles={theme => ({
-            root: {
-              backgroundColor:
-                colorScheme === 'dark' ? theme.colors.dark[7] : theme.white,
-              ...(isClickable
-                ? {
-                    '&:hover': {
-                      backgroundColor:
-                        colorScheme === 'dark'
-                          ? theme.colors.dark[6]
-                          : theme.colors.gray[1],
-                      boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-                    },
-                  }
-                : {}),
-            },
-          })}
-          onClick={handleClick}
-        >
-          <Group align="flex-start" gap="sm" wrap="nowrap">
-            {/* Activity Type Icon */}
-            <ThemeIcon
-              color={ActivityIcon ? 'blue' : 'gray'}
-              variant="light"
-              size={22}
-              radius={4}
-              mt={2}
-              style={{ flexShrink: 0 }}
-            >
-              {ActivityIcon ? (
-                <ActivityIcon size={14} />
-              ) : (
-                <IconAlertCircle size={14} />
-              )}
-            </ThemeIcon>
-
-            {/* Content */}
-            <Stack gap={4} style={{ flex: 1, minWidth: 0 }}>
-              <Group gap="xs" align="center" wrap="nowrap">
-                {/* Action Badge */}
-                <Badge
-                  color={actionColor}
-                  variant="light"
-                  size="xs"
-                  radius="sm"
-                  leftSection={ActionIcon && <ActionIcon size={10} />}
-                >
-                  {actionDisplayName}
-                </Badge>
-
-                {/* Clickable indicator */}
-                {isClickable && (
-                  <IconChevronRight
-                    size={12}
-                    style={{ color: 'var(--mantine-color-dimmed)' }}
-                  />
-                )}
-              </Group>
-
-              <Text
-                size="sm"
-                fw={500}
-                lineClamp={2}
-                style={{ wordBreak: 'break-word' }}
-              >
-                {formattedDescription}
-              </Text>
-
-              <Text size="xs" c="dimmed">
-                {formatDateTime(activity.timestamp)}
-              </Text>
-            </Stack>
-          </Group>
-        </Paper>
-      </Tooltip>
-    );
-  };
-
-  const RecentActivityList = () => (
-    <Card shadow="sm" padding={16} radius="md" withBorder>
-      <Group justify="space-between" mb={12}>
-        <Text size="15px" fw={600}>
-          {t('dashboard.sections.recentActivity', 'Recent Activity')}
-        </Text>
-      </Group>
-
-      {lastActivityUpdate && (
-        <Text size="11px" c="dimmed" mb={10}>
-          {t('dashboard.activity.lastUpdated', 'Last updated')}:{' '}
-          {lastActivityUpdate.toLocaleTimeString([], {
-            timeZone: timezoneService.getTimezone(),
-          })}
-        </Text>
-      )}
-
-      {recentActivity.length > 0 ? (
-        <Stack gap={8}>
-          {recentActivity.slice(0, 4).map((activity, index) => (
-            <ActivityItem
-              key={`activity-${index}-${activity.id || 'no-id'}-${activity.timestamp || `index-${index}`}`}
-              activity={activity}
-              index={index}
-            />
-          ))}
-        </Stack>
-      ) : (
-        <Paper
-          p="md"
-          radius="md"
-          styles={theme => ({
-            root: {
-              backgroundColor:
-                colorScheme === 'dark'
-                  ? theme.colors.dark[6]
-                  : theme.colors.gray[1],
-            },
-          })}
-        >
-          <Stack align="center" gap="xs">
-            <ThemeIcon color="gray" variant="light" size="lg">
-              <IconAlertCircle size={20} />
-            </ThemeIcon>
-            <Text size="sm" fw={500} c="dimmed" ta="center">
-              {t('dashboard.activity.noActivity', 'No recent activity')}
-            </Text>
-            <Text size="xs" c="dimmed" ta="center">
-              {t(
-                'dashboard.activity.noActivityDescription',
-                'Your medical record activities will appear here'
-              )}
-            </Text>
-          </Stack>
-        </Paper>
-      )}
-    </Card>
-  );
-
-  if (loading) {
-    return (
-      <Container size={1400} py="xl">
-        <Stack align="center" justify="center" style={{ minHeight: '60vh' }}>
-          <Progress
-            value={75}
-            size="lg"
-            radius="xl"
-            w="100%"
-            maw={400}
-            animate
-          />
-          <Text c="dimmed">
-            {t('dashboard.loading', 'Loading your medical dashboard...')}
-          </Text>
-        </Stack>
-      </Container>
-    );
+  function handlePatientChange(nextPatient) {
+    // Hide details before requesting the next person's data.
+    setOpen(null);
+    setCurrentPatient(nextPatient);
+    invalidateAll();
   }
 
   return (
-    <Container size={1400} py="md" px={{ base: 12, sm: 16, md: 'md' }}>
-      <PageHeader
-        title="MediKeep"
-        icon={
-          <img
-            src="/medikeep-icon.svg"
-            alt=""
-            width={36}
-            height={36}
-            style={{ verticalAlign: 'middle' }}
-          />
-        }
-        variant="dashboard"
-        showBackButton={false}
-      />
-
-      <Stack gap={{ base: 16, md: 20 }} mt={{ base: 12, md: 20 }}>
-        {/* Welcome Section */}
-        {showWelcomeBox && (
-          <Paper
-            p="14px 20px"
-            radius="md"
-            bg="var(--mantine-primary-color-filled)"
-            c="white"
-            pos="relative"
-          >
-            <ActionIcon
-              variant="subtle"
-              color="rgba(255,255,255,0.7)"
+    <Container size={1100} py="md" className="lab-overview">
+      <PageHeader title="MediKeep" showBackButton={false} variant="dashboard" />
+      <Stack gap="md" mt="lg">
+        <PatientSelector
+          compact
+          currentPatientId={patientId}
+          onPatientChange={handlePatientChange}
+        />
+        <InvitationNotifications hideWhenEmpty />
+        <Group justify="space-between" align="end">
+          <div>
+            <Title order={2}>Health overview</Title>
+            <Group gap={6}>
+              <Text c="dimmed" size="sm">
+                {latestDate
+                  ? `Latest report · ${dateLabel(latestDate)}`
+                  : 'Results from your lab reports'}
+              </Text>
+              <Tooltip label={HOW_TO_READ} multiline w={320} withArrow>
+                <IconInfoCircle
+                  size={15}
+                  aria-label="How to read this"
+                  color="var(--mantine-color-dimmed)"
+                />
+              </Tooltip>
+            </Group>
+          </div>
+          <Group gap="xs">
+            <Button
+              component={Link}
+              to="/lab-results"
+              variant="default"
               size="sm"
-              pos="absolute"
-              top={8}
-              right={8}
-              onClick={() => {
-                setShowWelcomeBox(false);
-                // Persist the dismissal for this user
-                if (authUser?.id) {
-                  localStorage.setItem(
-                    `welcomeBox_dismissed_${authUser.id}`,
-                    'true'
-                  );
-                }
-              }}
-              title="Close welcome message"
-              style={{
-                zIndex: 1,
-              }}
             >
-              <IconX size={14} />
+              All reports
+            </Button>
+            <ActionIcon
+              variant="default"
+              size="lg"
+              aria-label="Refresh"
+              onClick={data.refresh}
+              disabled={!patientId || data.loading}
+            >
+              <IconRefresh size={16} />
             </ActionIcon>
-
-            <Flex
-              justify="space-between"
-              align="center"
-              pr={{ base: 32, sm: 'xl' }}
-              direction={{ base: 'column', sm: 'row' }}
-              gap={{ base: 8, sm: 'xs' }}
-              wrap="wrap"
-            >
-              <div>
-                <Title order={2} size="18px" fw={600} mb={4}>
-                  {t('dashboard.title', 'MediKeep Dashboard')}
-                </Title>
-                <Text size="13px" opacity={0.9}>
-                  {t(
-                    'dashboard.subtitle',
-                    'Manage your health information securely'
-                  )}
-                </Text>
-              </div>
-              {authUser && (
-                <Badge
-                  bg="rgba(255,255,255,0.2)"
-                  variant="filled"
-                  size="lg"
-                  radius="xl"
-                  style={{ alignSelf: 'flex-start' }}
-                >
-                  {t('dashboard.hello', 'Hello')},{' '}
-                  {authUser.fullName || authUser.full_name || authUser.username}
-                  !
-                </Badge>
-              )}
-            </Flex>
-          </Paper>
-        )}
-
-        {/* Patient Selector and Search Bar - Responsive Layout */}
-        <Flex
-          justify="space-between"
-          align="flex-end"
-          gap="md"
-          direction={{ base: 'column', sm: 'row' }}
-          wrap="wrap"
-          style={{ width: '100%' }}
-        >
-          {/* Patient Selector */}
-          <Box
-            style={{
-              flex: '1 1 auto',
-              maxWidth: isMobile ? '100%' : '500px',
-              minWidth: '200px',
-              width: '100%',
-            }}
-          >
-            <PatientSelector
-              onPatientChange={handlePatientChange}
-              currentPatientId={currentPatient?.id}
-              loading={patientSelectorLoading}
-              compact={true}
-            />
-          </Box>
-
-          {/* Search Bar + Advanced Search link */}
-          <Group
-            gap="xs"
-            align="flex-end"
-            style={{ width: '100%', maxWidth: isMobile ? '100%' : 350 }}
-          >
-            <Box style={{ flex: 1, minWidth: 120 }}>
-              <GlobalSearch
-                patientId={currentPatient?.id}
-                placeholder={t(
-                  'dashboard.search.placeholder',
-                  'Search medical records...'
-                )}
-                width="100%"
-              />
-            </Box>
-            <Text
-              size="xs"
-              c="dimmed"
-              td="underline"
-              mb={6}
-              style={{ cursor: 'pointer', whiteSpace: 'nowrap' }}
-              onClick={() => navigate('/search')}
-              role="link"
-              tabIndex={0}
-              onKeyDown={e => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  navigate('/search');
-                }
-              }}
-            >
-              {t('dashboard.search.advancedSearch', 'Advanced Search')}
-            </Text>
           </Group>
-        </Flex>
-
-        {/* Main Content Grid */}
-        <Grid mb={24}>
-          <Grid.Col span={{ base: 12, sm: 8 }}>
-            <Stack gap={{ base: 16, md: 24 }}>
-              {/* Core Medical Information */}
-              <div>
-                <Text size="16px" fw={600} mb={12}>
-                  {t(
-                    'dashboard.sections.coreMedical',
-                    'Core Medical Information'
-                  )}
-                </Text>
-                <SimpleGrid cols={{ base: 2, sm: 3 }} spacing={12}>
-                  {coreModules.map((module, index) => (
-                    <ModuleCard key={index} module={module} />
-                  ))}
-                </SimpleGrid>
-              </div>
-
-              {/* Treatments and Procedures */}
-              <div>
-                <Text size="16px" fw={600} mb={12}>
-                  {t(
-                    'dashboard.sections.treatments',
-                    'Treatments and Procedures'
-                  )}
-                </Text>
-                <SimpleGrid cols={2} spacing={12}>
-                  {treatmentModules.map((module, index) => (
-                    <ModuleCard key={index} module={module} />
-                  ))}
-                </SimpleGrid>
-              </div>
-
-              {/* Health Monitoring */}
-              <div>
-                <Text size="16px" fw={600} mb={12}>
-                  {t(
-                    'dashboard.sections.healthMonitoring',
-                    'Health Monitoring'
-                  )}
-                </Text>
-                <SimpleGrid cols={{ base: 2, sm: 3 }} spacing={12}>
-                  {monitoringModules.map((module, index) => (
-                    <ModuleCard key={index} module={module} />
-                  ))}
-                </SimpleGrid>
-              </div>
-
-              {/* Prevention & History */}
-              <div>
-                <Text size="16px" fw={600} mb={12}>
-                  {t('dashboard.sections.prevention', 'Prevention & History')}
-                </Text>
-                <SimpleGrid cols={{ base: 2, sm: 3 }} spacing={12}>
-                  {preventionModules.map((module, index) => (
-                    <ModuleCard key={index} module={module} />
-                  ))}
-                </SimpleGrid>
-              </div>
+        </Group>
+        {patientError && (
+          <Alert color="red">
+            Could not load the current patient. Please select a patient or
+            refresh the page.
+          </Alert>
+        )}
+        {patientLoading || data.loading ? (
+          <Group justify="center" py="xl" role="status">
+            <Loader size="sm" />
+            <Text>Loading this patient’s results…</Text>
+          </Group>
+        ) : data.error ? (
+          <Alert color="red" title="Results unavailable">
+            <Text size="sm">{data.error}</Text>
+            <Button mt="sm" size="xs" onClick={data.refresh}>
+              Retry
+            </Button>
+          </Alert>
+        ) : !patientId ? (
+          <Alert>Select a patient to view their results.</Alert>
+        ) : !metrics.length ? (
+          <Paper withBorder p="xl" radius="md">
+            <Stack align="center">
+              <IconFlask size={28} />
+              <Title order={3}>No measurements imported yet</Title>
+              <Text c="dimmed" ta="center">
+                Linked PDFs remain available in Reports. Import their individual
+                results to populate this overview.
+              </Text>
+              <Button component={Link} to="/lab-results">
+                Browse reports
+              </Button>
             </Stack>
-          </Grid.Col>
-
-          <Grid.Col span={{ base: 12, sm: 4 }} className="dashboard-sidebar">
-            <Stack gap={16}>
-              {/* Additional Resources */}
-              <Card shadow="sm" padding={16} radius="md" withBorder>
-                <Text size="15px" fw={600} mb={12}>
-                  {t(
-                    'dashboard.sections.additionalResources',
-                    'Additional Resources'
-                  )}
-                </Text>
-                <Stack gap={6}>
-                  {additionalModules.map((module, index) => {
-                    const Icon = module.icon;
-                    return (
-                      <Paper
-                        key={index}
-                        className="dashboard-resource-item"
-                        p="8px 10px"
-                        radius="sm"
-                        onClick={_e => {
-                          logger.info(
-                            'Additional resource clicked:',
-                            module.link
-                          );
-                          try {
-                            navigate(module.link);
-                          } catch (error) {
-                            logger.error('Navigation error:', error);
-                            frontendLogger.logError(
-                              'Navigation error from additional resource',
-                              {
-                                error: error.message,
-                                component: 'Dashboard',
-                                link: module.link,
-                              }
-                            );
-                          }
-                        }}
-                        style={{ cursor: 'pointer' }}
-                        withBorder
-                      >
-                        <Group gap="sm">
-                          <Box
-                            className="dashboard-resource-icon"
-                            style={{
-                              background: `var(--mantine-color-${module.color}-light)`,
-                            }}
-                          >
-                            <Icon
-                              size={12}
-                              color={`var(--mantine-color-${module.color}-filled)`}
-                            />
-                          </Box>
-                          <Text size="13px" fw={500} style={{ flex: 1 }}>
-                            {module.title}
-                          </Text>
-                          <IconChevronRight
-                            size={14}
-                            color="var(--mantine-color-dimmed)"
-                          />
-                        </Group>
-                      </Paper>
-                    );
-                  })}
+          </Paper>
+        ) : (
+          <>
+            <Group gap="xs" wrap="wrap" className="lab-toolbar">
+              <SegmentedControl
+                aria-label="Which tests to show"
+                value={view}
+                onChange={value => setParam('view', value, 'key')}
+                data={[
+                  { value: 'key', label: 'Key markers' },
+                  { value: 'all', label: 'Everything' },
+                ]}
+              />
+              <TextInput
+                className="lab-search"
+                placeholder="Search tests, e.g. HbA1c, LDL, vitamin"
+                aria-label="Search tests"
+                leftSection={<IconSearch size={16} />}
+                rightSection={
+                  query && (
+                    <ActionIcon
+                      variant="subtle"
+                      color="gray"
+                      size="sm"
+                      aria-label="Clear search"
+                      onClick={() => setParam('q', '')}
+                    >
+                      <IconX size={14} />
+                    </ActionIcon>
+                  )
+                }
+                value={query}
+                onChange={event => setParam('q', event.currentTarget.value)}
+              />
+              <Group gap={6} role="group" aria-label="Filter tests">
+                {chips.map(chip => (
+                  <Button
+                    key={chip.id}
+                    size="compact-sm"
+                    radius="xl"
+                    variant={filter === chip.id ? 'filled' : 'default'}
+                    color="dark"
+                    aria-pressed={filter === chip.id}
+                    onClick={() => setParam('filter', chip.id, 'all')}
+                    rightSection={
+                      <Text span size="xs" opacity={0.7}>
+                        {chip.count}
+                      </Text>
+                    }
+                  >
+                    {chip.label}
+                  </Button>
+                ))}
+              </Group>
+            </Group>
+            <Text size="xs" c="dimmed" className="lab-legend">
+              <IconArrowUp size={12} /> High · <IconArrowDown size={12} /> Low,
+              as labelled in the report · <IconTrendingUp size={12} /> change
+              since the previous report · Select a test for its history and
+              original reports
+            </Text>
+            {data.truncated && (
+              <Alert color="yellow">
+                Showing the latest 5,000 readings. Older results remain
+                available in the reports list.
+              </Alert>
+            )}
+            {visible.length ? (
+              <LabCategoryCards
+                metrics={visible}
+                isPrimary={view === 'key' ? isPrimary : null}
+                showAll={filtering}
+                leading={
+                  !filtering && (
+                    <BodyCard
+                      readings={body.readings}
+                      error={body.error}
+                      dateLabel={dateLabel}
+                    />
+                  )
+                }
+                onOpen={key => setOpen({ patientId, key, previewIndex: null })}
+                dateLabel={dateLabel}
+              />
+            ) : (
+              <Paper withBorder p="xl" radius="md">
+                <Stack align="center" gap="xs">
+                  <Text c="dimmed">No tests match these filters.</Text>
+                  <Button size="xs" variant="default" onClick={clearFilters}>
+                    Clear filters
+                  </Button>
                 </Stack>
-              </Card>
-              {/* Invitation Notifications */}
-              <InvitationNotifications />
-
-              {/* Recent Activity */}
-              <RecentActivityList />
-            </Stack>
-          </Grid.Col>
-        </Grid>
-
-        {/* Stats Row */}
-        <StatsRow />
+              </Paper>
+            )}
+          </>
+        )}
       </Stack>
+      <TestDrawer
+        key={patientId}
+        metric={openMetric}
+        previewIndex={activeOpen?.previewIndex ?? null}
+        onPreview={showPreview}
+        onClose={() => setOpen(null)}
+        reports={data.reports}
+        dateLabel={dateLabel}
+        pinned={
+          !!openMetric && isPinned(openMetric.key, isDefaultKey(openMetric))
+        }
+        onTogglePin={() =>
+          openMetric &&
+          setPinned(
+            openMetric.key,
+            isDefaultKey(openMetric),
+            !isPinned(openMetric.key, isDefaultKey(openMetric))
+          )
+        }
+      />
     </Container>
   );
-};
-
-export default Dashboard;
+}

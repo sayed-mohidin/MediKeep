@@ -37,6 +37,18 @@ const TabletNavigation = ({ user: _user, isAdmin, onLogout }) => {
         {Object.entries(navigationSections).map(([key, section]) => {
           if (key === 'admin') return null;
 
+          if (section.direct)
+            return section.items.map(item => (
+              <Button
+                key={item.id}
+                variant={isCurrentPath(item.path) ? 'light' : 'subtle'}
+                size="sm"
+                onClick={() => handleNavigation(item.path)}
+              >
+                {t(item.nameKey, item.name)}
+              </Button>
+            ));
+
           return (
             <Menu key={key} position="bottom-start" offset={8}>
               <Menu.Target>

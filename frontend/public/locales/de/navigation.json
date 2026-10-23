@@ -118,5 +118,10 @@
       "misc": "Sonstiges",
       "tools": "Werkzeuge"
     }
+  },
+  "labOverview": {
+    "navigation": "Gesundheit",
+    "overview": "Übersicht",
+    "moreRecords": "Weitere Einträge"
   }
 }

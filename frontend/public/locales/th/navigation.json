@@ -118,5 +118,10 @@
       "misc": "อื่นๆ",
       "tools": "เครื่องมือ"
     }
+  },
+  "labOverview": {
+    "navigation": "สุขภาพ",
+    "overview": "ภาพรวม",
+    "moreRecords": "บันทึกเพิ่มเติม"
   }
 }
