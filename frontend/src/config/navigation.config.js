@@ -1,4 +1,3 @@
-
 import { ENTITY_TYPES } from '../utils/entityRelationships';
 import { buildEntityUrl } from '../utils/entityNavigation';
 
@@ -282,26 +281,39 @@ export const VIEWPORT_CONFIGS = {
 };
 
 // Helper function to get navigation sections based on viewport and user role
-export const getNavigationSections = (viewport, isAdmin = false) => {
-  // Removed frequent navigation logging for performance
-
-  const sections = { ...NAVIGATION_SECTIONS };
-
-  // Add admin section if user is admin
-  if (isAdmin) {
-    sections.admin = ADMIN_SECTION;
-  }
-
-  // Apply viewport-specific modifications
-  const config = VIEWPORT_CONFIGS[viewport];
-
-  if (config?.hideSections) {
-    config.hideSections.forEach(sectionKey => {
-      delete sections[sectionKey];
-    });
-  }
-
-  return sections;
+export const getNavigationSections = (_viewport, isAdmin = false) => {
+  const items = Object.values(NAVIGATION_SECTIONS).flatMap(
+    section => section.items
+  );
+  const primaryIds = ['lab-results', 'patient-info'];
+  return {
+    overview: {
+      titleKey: 'navigation:labOverview.navigation',
+      title: 'Health',
+      direct: true,
+      items: [
+        {
+          id: 'dashboard',
+          nameKey: 'navigation:labOverview.overview',
+          name: 'Overview',
+          path: '/dashboard',
+          icon: '◉',
+        },
+        ...primaryIds.map(id => items.find(item => item.id === id)),
+      ],
+    },
+    more: {
+      titleKey: 'navigation:labOverview.moreRecords',
+      title: 'More records',
+      collapsible: true,
+      items: [
+        ...items.filter(
+          item => !primaryIds.includes(item.id) && item.id !== 'settings'
+        ),
+        ...(isAdmin ? ADMIN_SECTION.items : []),
+      ],
+    },
+  };
 };
 
 // Helper to get featured items for quick access

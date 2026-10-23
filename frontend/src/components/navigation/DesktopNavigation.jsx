@@ -43,6 +43,18 @@ const DesktopNavigation = ({ user: _user, isAdmin, onLogout }) => {
           // Skip admin section from main nav (goes in account dropdown)
           if (key === 'admin') return null;
 
+          if (section.direct)
+            return section.items.map(item => (
+              <Button
+                key={item.id}
+                variant={isCurrentPath(item.path) ? 'light' : 'subtle'}
+                size="sm"
+                onClick={() => handleNavigation(item.path)}
+              >
+                {t(item.nameKey, item.name)}
+              </Button>
+            ));
+
           return (
             <Menu
               key={key}

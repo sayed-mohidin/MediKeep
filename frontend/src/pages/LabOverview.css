@@ -1,0 +1,125 @@
+.lab-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.lab-summary-card {
+  background: var(--mantine-color-body);
+  color: var(--mantine-color-text);
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: 12px;
+  padding: 20px;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  min-width: 0;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+.lab-summary-card:hover {
+  border-color: var(--mantine-color-teal-6);
+  box-shadow: 0 3px 12px #0000000a;
+}
+.lab-summary-card:focus-visible {
+  outline: 3px solid var(--mantine-color-teal-6);
+  outline-offset: 3px;
+}
+.lab-card-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+.lab-card-title {
+  font-weight: 650;
+  font-size: 17px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.lab-card-icon {
+  width: 32px;
+  height: 32px;
+  flex: none;
+  border-radius: 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  background: var(--mantine-color-teal-light);
+  color: var(--mantine-color-teal-light-color);
+}
+.lab-card-metric {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  margin: 10px 0;
+  font-size: 13px;
+}
+.lab-metric-name {
+  color: var(--mantine-color-dimmed);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.lab-metric-value {
+  text-align: right;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+  max-width: 55%;
+  overflow-wrap: anywhere;
+}
+.lab-metric-value small {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--mantine-color-dimmed);
+}
+.lab-reading-comparison {
+  display: block;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--mantine-color-dimmed);
+  line-height: 1.5;
+}
+.lab-reading-comparison > span {
+  display: block;
+}
+.lab-source-flag {
+  font-size: 10px;
+  color: var(--mantine-color-yellow-8);
+  margin-left: 5px;
+}
+.lab-card-footer {
+  border-top: 1px solid var(--mantine-color-default-border);
+  margin-top: 17px;
+  padding-top: 12px;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--mantine-color-dimmed);
+}
+.lab-card-footer > span:last-child {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--mantine-color-teal-light-color);
+}
+@media (max-width: 600px) {
+  .lab-overview-grid {
+    grid-template-columns: 1fr;
+  }
+  .lab-summary-card {
+    padding: 16px;
+  }
+  .lab-card-title {
+    font-size: 16px;
+  }
+  .lab-card-metric {
+    font-size: 12px;
+  }
+}
