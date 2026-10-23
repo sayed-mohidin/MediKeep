@@ -118,5 +118,10 @@
       "misc": "Varie",
       "tools": "Strumenti"
     }
+  },
+  "labOverview": {
+    "navigation": "Salute",
+    "overview": "Panoramica",
+    "moreRecords": "Altri dati"
   }
 }

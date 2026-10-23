@@ -118,5 +118,10 @@
       "misc": "其他",
       "tools": "工具"
     }
+  },
+  "labOverview": {
+    "navigation": "健康",
+    "overview": "概览",
+    "moreRecords": "更多记录"
   }
 }

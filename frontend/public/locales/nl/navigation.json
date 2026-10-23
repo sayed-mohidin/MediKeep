@@ -118,5 +118,10 @@
       "misc": "Overig",
       "tools": "Hulpmiddelen"
     }
+  },
+  "labOverview": {
+    "navigation": "Gezondheid",
+    "overview": "Overzicht",
+    "moreRecords": "Meer gegevens"
   }
 }

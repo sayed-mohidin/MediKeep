@@ -118,5 +118,10 @@
       "misc": "Прочее",
       "tools": "Инструменты"
     }
+  },
+  "labOverview": {
+    "navigation": "Здоровье",
+    "overview": "Обзор",
+    "moreRecords": "Другие записи"
   }
 }

@@ -12,13 +12,21 @@ export function useBodyMeasures(patientId) {
     if (!patientId) return undefined;
     const controller = new AbortController();
     let active = true;
-    apiService
-      .get(`/vitals/patient/${patientId}`, {
-        params: { limit: 500 },
-        signal: controller.signal,
-      })
+    // Promise.resolve keeps a missing or synchronous response from breaking the page.
+    Promise.resolve()
+      .then(() =>
+        apiService.get(`/vitals/patient/${patientId}`, {
+          params: { limit: 500 },
+          signal: controller.signal,
+        })
+      )
       .then(readings => {
-        if (active) setState({ patientId, readings, error: false });
+        if (active)
+          setState({
+            patientId,
+            readings: Array.isArray(readings) ? readings : [],
+            error: false,
+          });
       })
       .catch(() => {
         if (active && !controller.signal.aborted)

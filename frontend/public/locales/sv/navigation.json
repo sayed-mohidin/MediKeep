@@ -118,5 +118,10 @@
       "misc": "Övrigt",
       "tools": "Verktyg"
     }
+  },
+  "labOverview": {
+    "navigation": "Hälsa",
+    "overview": "Översikt",
+    "moreRecords": "Fler uppgifter"
   }
 }
