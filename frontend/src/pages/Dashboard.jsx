@@ -8,6 +8,7 @@ import {
   Group,
   Loader,
   Paper,
+  SegmentedControl,
   Stack,
   Text,
   TextInput,
@@ -27,21 +28,25 @@ import {
 import PageHeader from '../components/layout/PageHeader';
 import PatientSelector from '../components/medical/PatientSelector';
 import InvitationNotifications from '../components/dashboard/InvitationNotifications';
+import BodyCard from '../components/dashboard/BodyCard';
 import LabCategoryCards from '../components/dashboard/LabCategoryCards';
 import TestDrawer from '../components/dashboard/TestDrawer';
 import { useCurrentPatient, useCacheManager } from '../hooks/useGlobalData';
 import { useDateFormat } from '../hooks/useDateFormat';
+import { useBodyMeasures } from '../hooks/useBodyMeasures';
 import { useLabOverview } from '../hooks/useLabOverview';
+import { usePinnedMarkers } from '../hooks/usePinnedMarkers';
 import {
   buildMetrics,
   filterMetrics,
   hasChanged,
+  isKeyMarker,
   observationDate,
 } from '../utils/labOverview';
 import './LabOverview.css';
 
 const HOW_TO_READ =
-  'Each card lists the latest reading of every test in that category. Flags come from the labels or ranges recorded in the report and are not a clinical assessment. Changes compare against the previous dated reading in the same unit, without rescaling.';
+  'Key markers shows the tests most often followed in routine check-ups, plus anything flagged; star a test to add or remove it. Everything shows every test. Flags come from the labels or ranges recorded in the report and are not a clinical assessment. Changes compare against the previous dated reading in the same unit, without rescaling.';
 
 export default function Dashboard() {
   const {
@@ -56,6 +61,9 @@ export default function Dashboard() {
   const [params, setParams] = useSearchParams();
   const query = params.get('q') || '';
   const filter = params.get('filter') || 'all';
+  const view = params.get('view') === 'all' ? 'all' : 'key';
+  const body = useBodyMeasures(patientId);
+  const { isPinned, setPinned } = usePinnedMarkers(patientId);
   // The open test belongs to one patient and is dropped on switch.
   const [open, setOpen] = useState(null);
 
@@ -72,6 +80,10 @@ export default function Dashboard() {
     ? metrics.find(metric => metric.key === activeOpen.key)
     : null;
   const filtering = !!query.trim() || filter !== 'all';
+  const isDefaultKey = metric => isKeyMarker(metric.latest);
+  // Flagged results always stay visible in the trimmed view.
+  const isPrimary = metric =>
+    metric.flagged || isPinned(metric.key, isDefaultKey(metric));
   const latestDate = metrics
     .map(metric => observationDate(metric.latest))
     .filter(Boolean)
@@ -214,6 +226,15 @@ export default function Dashboard() {
         ) : (
           <>
             <Group gap="xs" wrap="wrap" className="lab-toolbar">
+              <SegmentedControl
+                aria-label="Which tests to show"
+                value={view}
+                onChange={value => setParam('view', value, 'key')}
+                data={[
+                  { value: 'key', label: 'Key markers' },
+                  { value: 'all', label: 'Everything' },
+                ]}
+              />
               <TextInput
                 className="lab-search"
                 placeholder="Search tests, e.g. HbA1c, LDL, vitamin"
@@ -271,7 +292,17 @@ export default function Dashboard() {
             {visible.length ? (
               <LabCategoryCards
                 metrics={visible}
+                isPrimary={view === 'key' ? isPrimary : null}
                 showAll={filtering}
+                leading={
+                  !filtering && (
+                    <BodyCard
+                      readings={body.readings}
+                      error={body.error}
+                      dateLabel={dateLabel}
+                    />
+                  )
+                }
                 onOpen={key => setOpen({ patientId, key, previewIndex: null })}
                 dateLabel={dateLabel}
               />
@@ -296,6 +327,17 @@ export default function Dashboard() {
         onClose={() => setOpen(null)}
         reports={data.reports}
         dateLabel={dateLabel}
+        pinned={
+          !!openMetric && isPinned(openMetric.key, isDefaultKey(openMetric))
+        }
+        onTogglePin={() =>
+          openMetric &&
+          setPinned(
+            openMetric.key,
+            isDefaultKey(openMetric),
+            !isPinned(openMetric.key, isDefaultKey(openMetric))
+          )
+        }
       />
     </Container>
   );

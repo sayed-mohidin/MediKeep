@@ -11,6 +11,7 @@ import {
   previousComparison,
   displayChange,
   sourcePage,
+  isKeyMarker,
   displayPercent,
 } from './labOverview';
 import {
@@ -219,6 +220,36 @@ describe('lab overview grouping', () => {
     ]);
     expect(metrics.filter(m => m.flagged)).toHaveLength(1);
     expect(metrics.find(m => !m.flagged).latest.status).toBeNull();
+  });
+});
+describe('key markers', () => {
+  it('keeps routine headline markers and leaves panel detail out', () => {
+    const key = name => isKeyMarker(row(name));
+    [
+      'GLYCOSILATED HAEMOGLOBIN (HbA1C)',
+      'BLOOD GLUCOSE FASTING',
+      'LDL Cholesterol',
+      'HDL Cholesterol',
+      'Triglycerides',
+      'Creatinine',
+      'eGFR',
+      'ALT (SGPT)',
+      'TSH',
+      'Vitamin B12',
+      '25 OH Vitamin D',
+      'Haemoglobin',
+    ].forEach(name => expect(key(name)).toBe(true));
+    [
+      'NON HDL CHOLESTEROL',
+      'VLDL Cholesterol',
+      'LDL/HDL Ratio',
+      'BUN / Sr.Creatnine Ratio',
+      'Urine Creatinine',
+      'Mean Corpuscular Hemoglobin',
+      'MCV',
+      'AST (SGOT)',
+      'Glucose Random',
+    ].forEach(name => expect(key(name)).toBe(false));
   });
 });
 describe('source pages', () => {

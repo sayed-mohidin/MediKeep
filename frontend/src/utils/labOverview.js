@@ -249,6 +249,28 @@ export const orderForCard = metrics =>
       byName(a, b)
   );
 
+// Markers commonly followed in routine check-ups. Anything flagged is shown as well,
+// so trimming the view never hides an abnormal result.
+const KEY_MARKERS = [
+  /\b(hba1c|a1c|glycosylated haemoglobin|glycosilated haemoglobin|glycated haemoglobin)\b/,
+  /\bfasting\b.*\bglucose\b|\bglucose\b.*\bfasting\b|\bfbs\b/,
+  /^(?!.*\b(vldl|ratio|non)\b).*\b(ldl|hdl)\b/,
+  /\btriglycerides?\b/,
+  /^(?!.*\b(ratio|clearance)\b).*\bcreatinine\b/,
+  /\begfr\b|glomerular filtration/,
+  /\b(alt|sgpt)\b/,
+  /\btsh\b/,
+  /\bb12\b/,
+  /^(haemoglobin|hemoglobin|hb|hgb)$/,
+];
+export function isKeyMarker(item) {
+  const name = normalizeTestName(item.canonical_test_name || item.test_name);
+  if (/\burine\b/.test(name)) return false;
+  return (
+    isVitaminD25Oh(item) || KEY_MARKERS.some(pattern => pattern.test(name))
+  );
+}
+
 // Imported readings record where they were read from, e.g. "Source: Paperless document 81, page 2."
 export function sourcePage(item) {
   const match = /\bpage (\d+)\b/i.exec(item.notes || '');

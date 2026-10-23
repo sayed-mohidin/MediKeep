@@ -15,6 +15,8 @@ const mocks = vi.hoisted(() => ({
   setPatient: vi.fn(),
   invalidate: vi.fn(),
   getFiles: vi.fn(),
+  vitals: [],
+  unitSystem: 'metric',
 }));
 vi.mock('../hooks/useGlobalData', () => ({
   useCurrentPatient: () => ({ patient: mocks.patient, loading: false }),
@@ -25,6 +27,12 @@ vi.mock('../hooks/useGlobalData', () => ({
 }));
 vi.mock('../hooks/useLabOverview', () => ({
   useLabOverview: () => mocks.data,
+}));
+vi.mock('../hooks/useBodyMeasures', () => ({
+  useBodyMeasures: () => ({ readings: mocks.vitals, error: false }),
+}));
+vi.mock('../contexts/UserPreferencesContext', () => ({
+  useUserPreferences: () => ({ unitSystem: mocks.unitSystem }),
 }));
 vi.mock('../hooks/useDateFormat', () => ({
   useDateFormat: () => ({ formatDate: value => value }),
@@ -46,8 +54,14 @@ vi.mock('../services/api', () => ({
     getEntityFileViewUrl: id => `/api/v1/entity-files/files/${id}/view`,
   },
 }));
+// Most tests look at every test; the key-marker tests use keyWrapper.
 const wrapper = ({ children }) => (
-  <MemoryRouter>
+  <MemoryRouter initialEntries={['/dashboard?view=all']}>
+    <MantineProvider>{children}</MantineProvider>
+  </MemoryRouter>
+);
+const keyWrapper = ({ children }) => (
+  <MemoryRouter initialEntries={['/dashboard']}>
     <MantineProvider>{children}</MantineProvider>
   </MemoryRouter>
 );
@@ -97,6 +111,9 @@ const previewFrom = (panel, date) =>
     within(panel).getByRole('button', { name: `Preview report from ${date}` })
   );
 beforeEach(() => {
+  localStorage.clear();
+  mocks.vitals = [];
+  mocks.unitSystem = 'metric';
   mocks.patient = { id: 10 };
   mocks.data = fixture();
   mocks.getFiles.mockReset();
@@ -156,7 +173,7 @@ describe('health overview cards', () => {
     expect(
       within(liver).getByRole('button', { name: 'Open Bilirubin 7 history' })
     ).toBeInTheDocument();
-    fireEvent.click(within(liver).getByRole('button', { name: 'Show all 7' }));
+    fireEvent.click(within(liver).getByRole('button', { name: 'Show 2 more' }));
     expect(
       within(liver).getAllByRole('button', { name: /^Open/ })
     ).toHaveLength(7);
@@ -318,5 +335,83 @@ describe('health overview cards', () => {
     expect(screen.getByText('Results unavailable')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
     expect(mocks.data.refresh).toHaveBeenCalled();
+  });
+});
+describe('key markers and body card', () => {
+  const ast = (extra = {}) => alt({ id: 7, test_name: 'AST (SGOT)', ...extra });
+  it('shows only key markers and flagged tests until expanded', () => {
+    mocks.data.components = [
+      alt(),
+      ast(),
+      alt({ id: 8, test_name: 'Bilirubin Total', status: 'high' }),
+    ];
+    render(<Dashboard />, { wrapper: keyWrapper });
+    const liver = screen.getByRole('region', { name: 'Liver markers' });
+    expect(
+      within(liver).getByText('2 of 3 tests · 2024-01-02')
+    ).toBeInTheDocument();
+    expect(row('ALT')).toBeInTheDocument();
+    expect(row('Bilirubin Total')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Open AST history' })
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('region', { name: 'Other tests' })
+    ).not.toBeInTheDocument();
+    fireEvent.click(within(liver).getByRole('button', { name: 'Show 1 more' }));
+    expect(row('AST')).toBeInTheDocument();
+  });
+  it('searching finds tests outside the key markers', () => {
+    mocks.data.components = [alt(), ast()];
+    render(<Dashboard />, { wrapper: keyWrapper });
+    fireEvent.change(screen.getByLabelText('Search tests'), {
+      target: { value: 'sgot' },
+    });
+    expect(row('AST')).toBeInTheDocument();
+  });
+  it('pins and unpins tests for this patient', async () => {
+    mocks.data.components = [alt(), ast()];
+    render(<Dashboard />, { wrapper: keyWrapper });
+    fireEvent.click(screen.getByRole('button', { name: 'Show 1 more' }));
+    const panel = await openTest('AST');
+    fireEvent.click(
+      within(panel).getByRole('button', { name: 'Add to Key markers' })
+    );
+    expect(
+      within(panel).getByRole('button', { name: 'Remove from Key markers' })
+    ).toBeInTheDocument();
+    expect(localStorage.setItem).toHaveBeenCalledWith(
+      'medikeep.keyMarkers.10',
+      expect.stringContaining('"pinned":["ast sgot|quantitative"]')
+    );
+  });
+  it('invites adding weight and height when Vitals are empty', () => {
+    render(<Dashboard />, { wrapper: keyWrapper });
+    const card = screen.getByRole('region', { name: 'Body' });
+    expect(
+      within(card).getByText(/Add your weight and height/)
+    ).toBeInTheDocument();
+    expect(
+      within(card).getByRole('link', { name: 'Add in Vitals' })
+    ).toHaveAttribute('href', '/vitals');
+  });
+  it('shows BMI from the latest weight and height in the preferred units', () => {
+    mocks.vitals = [
+      { id: 1, recorded_date: '2024-01-01T08:00:00', weight: 165, height: 70 },
+      {
+        id: 2,
+        recorded_date: '2024-03-01T08:00:00',
+        weight: 160,
+        systolic_bp: 118,
+        diastolic_bp: 76,
+      },
+    ];
+    render(<Dashboard />, { wrapper: keyWrapper });
+    const card = screen.getByRole('region', { name: 'Body' });
+    expect(within(card).getByText('23')).toBeInTheDocument();
+    expect(within(card).getByText('Healthy range')).toBeInTheDocument();
+    expect(within(card).getByText('72.6')).toBeInTheDocument();
+    expect(within(card).getByText('-2.2 kg')).toBeInTheDocument();
+    expect(within(card).getByText('118/76')).toBeInTheDocument();
   });
 });

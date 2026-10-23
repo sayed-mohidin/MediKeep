@@ -97,26 +97,15 @@ function TestRow({ metric, cardDate, onOpen, dateLabel }) {
   );
 }
 
-function CategoryCard({ group, metrics, showAll, onOpen, dateLabel }) {
-  const [expanded, setExpanded] = useState(false);
-  const ordered = orderForCard(metrics);
-  const visible =
-    showAll || expanded ? ordered : ordered.slice(0, COLLAPSED_ROWS);
-  const hidden = ordered.length - visible.length;
-  const flagged = metrics.filter(metric => metric.flagged).length;
-  const theme = CARD_THEMES[group.id] || CARD_THEMES.other;
-  const cardDate = metrics
-    .map(metric => observationDate(metric.latest))
-    .filter(Boolean)
-    .sort()
-    .at(-1);
+// Shared frame for category cards and the Body card.
+export function ThemedCard({ theme, title, subtitle, badge, children }) {
   return (
     <Paper
       withBorder
       radius="md"
       className="lab-card"
       component="section"
-      aria-label={group.title}
+      aria-label={title}
       style={{
         '--lab-accent': `var(--mantine-color-${theme.color}-6)`,
         '--lab-accent-tint': `var(--mantine-color-${theme.color}-light)`,
@@ -133,18 +122,62 @@ function CategoryCard({ group, metrics, showAll, onOpen, dateLabel }) {
           <theme.icon size={20} stroke={1.8} />
         </ThemeIcon>
         <div className="lab-card-title">
-          <Text fw={700}>{group.title}</Text>
-          <Text size="xs" c="dimmed">
-            {metrics.length} {metrics.length === 1 ? 'test' : 'tests'}
-            {cardDate && ` · ${dateLabel(cardDate)}`}
-          </Text>
+          <Text fw={700}>{title}</Text>
+          {subtitle && (
+            <Text size="xs" c="dimmed">
+              {subtitle}
+            </Text>
+          )}
         </div>
-        {flagged > 0 && (
+        {badge}
+      </div>
+      {children}
+    </Paper>
+  );
+}
+
+function CategoryCard({
+  group,
+  metrics,
+  isPrimary,
+  showAll,
+  onOpen,
+  dateLabel,
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const ordered = orderForCard(metrics);
+  // Key view: the card's key/pinned/flagged tests. All view: the first few rows.
+  const primary = showAll
+    ? ordered
+    : isPrimary
+      ? ordered.filter(isPrimary)
+      : ordered.slice(0, COLLAPSED_ROWS);
+  if (!primary.length) return null;
+  const visible = expanded ? ordered : primary;
+  const hidden = ordered.length - primary.length;
+  const flagged = metrics.filter(metric => metric.flagged).length;
+  const cardDate = metrics
+    .map(metric => observationDate(metric.latest))
+    .filter(Boolean)
+    .sort()
+    .at(-1);
+  const count =
+    isPrimary && hidden > 0
+      ? `${primary.length} of ${ordered.length} tests`
+      : `${ordered.length} ${ordered.length === 1 ? 'test' : 'tests'}`;
+  return (
+    <ThemedCard
+      theme={CARD_THEMES[group.id] || CARD_THEMES.other}
+      title={group.title}
+      subtitle={`${count}${cardDate ? ` · ${dateLabel(cardDate)}` : ''}`}
+      badge={
+        flagged > 0 && (
           <Badge color="yellow" variant="light" size="sm">
             {flagged} flagged
           </Badge>
-        )}
-      </div>
+        )
+      }
+    >
       <div className="lab-card-rows">
         {visible.map(metric => (
           <TestRow
@@ -156,28 +189,31 @@ function CategoryCard({ group, metrics, showAll, onOpen, dateLabel }) {
           />
         ))}
       </div>
-      {!showAll && ordered.length > COLLAPSED_ROWS && (
+      {hidden > 0 && (
         <Button
           variant="subtle"
           size="compact-sm"
           className="lab-card-more"
           onClick={() => setExpanded(value => !value)}
         >
-          {hidden > 0 ? `Show all ${ordered.length}` : 'Show fewer'}
+          {expanded ? 'Show fewer' : `Show ${hidden} more`}
         </Button>
       )}
-    </Paper>
+    </ThemedCard>
   );
 }
 
 export default function LabCategoryCards({
   metrics,
+  isPrimary,
   showAll,
   onOpen,
   dateLabel,
+  leading,
 }) {
   return (
     <div className="lab-card-grid">
+      {leading}
       {OVERVIEW_GROUPS.map(group => {
         const items = metrics.filter(metric => metric.group === group.id);
         return (
@@ -186,6 +222,7 @@ export default function LabCategoryCards({
               key={group.id}
               group={group}
               metrics={items}
+              isPrimary={isPrimary}
               showAll={showAll}
               onOpen={onOpen}
               dateLabel={dateLabel}

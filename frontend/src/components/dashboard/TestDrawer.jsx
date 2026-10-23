@@ -1,5 +1,14 @@
-import { Button, Drawer, Stack, Table, Text } from '@mantine/core';
-import { IconEye } from '@tabler/icons-react';
+import {
+  ActionIcon,
+  Button,
+  Drawer,
+  Group,
+  Stack,
+  Table,
+  Text,
+  Tooltip,
+} from '@mantine/core';
+import { IconEye, IconStar, IconStarFilled } from '@tabler/icons-react';
 import {
   CartesianGrid,
   Line,
@@ -192,8 +201,11 @@ export default function TestDrawer({
   onClose,
   reports,
   dateLabel,
+  pinned,
+  onTogglePin,
 }) {
   const latest = metric?.latest;
+  const pinLabel = pinned ? 'Remove from Key markers' : 'Add to Key markers';
   return (
     <Drawer
       opened={!!metric}
@@ -202,15 +214,29 @@ export default function TestDrawer({
       size="xl"
       title={
         latest && (
-          <Stack gap={0}>
-            <Text fw={700} size="lg">
-              {summaryTestName(latest)}
-            </Text>
-            <Text size="sm" c="dimmed">
-              Latest {displayValue(latest)} {latest.unit} ·{' '}
-              {dateLabel(observationDate(latest))}
-            </Text>
-          </Stack>
+          <Group gap="sm" wrap="nowrap" align="flex-start">
+            <Stack gap={0}>
+              <Text fw={700} size="lg">
+                {summaryTestName(latest)}
+              </Text>
+              <Text size="sm" c="dimmed">
+                Latest {displayValue(latest)} {latest.unit} ·{' '}
+                {dateLabel(observationDate(latest))}
+              </Text>
+            </Stack>
+            <Tooltip label={pinLabel} withArrow>
+              <ActionIcon
+                variant="subtle"
+                color="yellow"
+                size="lg"
+                aria-label={pinLabel}
+                aria-pressed={pinned}
+                onClick={onTogglePin}
+              >
+                {pinned ? <IconStarFilled size={20} /> : <IconStar size={20} />}
+              </ActionIcon>
+            </Tooltip>
+          </Group>
         )
       }
       classNames={{ body: 'lab-drawer-body' }}
