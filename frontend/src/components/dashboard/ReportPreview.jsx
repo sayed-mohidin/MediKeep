@@ -1,14 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import {
-  Button,
-  Drawer,
-  Group,
-  Loader,
-  Select,
-  Stack,
-  Text,
-} from '@mantine/core';
+import { Button, Group, Loader, Select, Stack, Text } from '@mantine/core';
 import {
   IconArrowLeft,
   IconArrowRight,
@@ -25,7 +17,7 @@ import {
   sourcePage,
   summaryTestName,
 } from '../../utils/labOverview';
-import { StatusFlag } from './LabMetricList';
+import StatusFlag from './StatusFlag';
 
 const isPdf = file =>
   file.file_type?.toLowerCase() === 'application/pdf' ||
@@ -109,11 +101,11 @@ function FileView({ file, page }) {
   );
 }
 
-export default function ReportPreviewDrawer({
+export default function ReportPreview({
   metric,
   index,
   onIndexChange,
-  onClose,
+  onBack,
   reports,
   dateLabel,
 }) {
@@ -143,137 +135,133 @@ export default function ReportPreviewDrawer({
     return () => window.removeEventListener('keydown', onKey);
   }, [metric, index, canOlder, canNewer, onIndexChange]);
 
+  if (!reading) return null;
   return (
-    <Drawer
-      opened={!!reading}
-      onClose={onClose}
-      position="right"
-      size="xl"
-      title={
-        reading && (
-          <Stack gap={0}>
-            <Text fw={600}>{report?.test_name || 'Lab report'}</Text>
-            <Text size="xs" c="dimmed">
-              {dateLabel(observationDate(reading))}
-              {(reading.facility || report?.facility) &&
-                ` · ${reading.facility || report.facility}`}
+    <div className="lab-preview">
+      <Group justify="space-between" gap="xs" wrap="nowrap">
+        <Button
+          size="compact-sm"
+          variant="subtle"
+          leftSection={<IconArrowLeft size={14} />}
+          onClick={onBack}
+        >
+          Back to history
+        </Button>
+        <Text size="xs" c="dimmed" ta="right">
+          {report?.test_name || 'Lab report'} ·{' '}
+          {dateLabel(observationDate(reading))}
+          {(reading.facility || report?.facility) &&
+            ` · ${reading.facility || report.facility}`}
+        </Text>
+      </Group>
+
+      <Group className="lab-preview-stepper" gap="xs" wrap="nowrap">
+        <Button
+          size="compact-sm"
+          variant="default"
+          leftSection={<IconArrowLeft size={14} />}
+          disabled={!canOlder}
+          onClick={() => onIndexChange(index + 1)}
+        >
+          Older
+        </Button>
+        <Text size="sm" fw={600}>
+          {summaryTestName(reading)}{' '}
+          <Text span size="sm" c="dimmed" fw={400}>
+            · {total - index} of {total}
+          </Text>
+        </Text>
+        <Button
+          size="compact-sm"
+          variant="default"
+          rightSection={<IconArrowRight size={14} />}
+          disabled={!canNewer}
+          onClick={() => onIndexChange(index - 1)}
+        >
+          Newer
+        </Button>
+      </Group>
+      <Group className="lab-preview-reading" gap="md">
+        <Text size="sm">
+          <Text span fw={700} size="lg">
+            {displayValue(reading)}
+          </Text>{' '}
+          {reading.unit} <StatusFlag status={reading.status} />
+        </Text>
+        <Text size="sm" c="dimmed">
+          Reference {displayReference(reading)}
+        </Text>
+        {page && (
+          <Text size="sm" c="dimmed">
+            Page {page}
+          </Text>
+        )}
+        {reading.test_name !== summaryTestName(reading) && (
+          <Text size="xs" c="dimmed">
+            {`Report label: "${reading.test_name}"`}
+          </Text>
+        )}
+      </Group>
+      {files.length > 1 && (
+        <Select
+          size="xs"
+          mb="xs"
+          aria-label="Attached file"
+          allowDeselect={false}
+          value={String(file.id)}
+          onChange={setChosen}
+          data={files.map(f => ({
+            value: String(f.id),
+            label: f.file_name,
+          }))}
+        />
+      )}
+      <div className="lab-preview-document">
+        {loading ? (
+          <Group justify="center" py="xl">
+            <Loader size="sm" aria-label="Loading report" />
+          </Group>
+        ) : error ? (
+          <Text size="sm" c="dimmed">
+            The report file couldn’t be loaded. Try again, or open the lab
+            result.
+          </Text>
+        ) : file ? (
+          <FileView key={`${file.id}:${page}`} file={file} page={page} />
+        ) : (
+          <Stack align="center" gap="xs" py="xl">
+            <IconFileText size={28} />
+            <Text size="sm" c="dimmed">
+              No file is attached to this report.
             </Text>
           </Stack>
-        )
-      }
-      classNames={{ body: 'lab-preview-body' }}
-    >
-      {reading && (
-        <>
-          <Group className="lab-preview-stepper" gap="xs" wrap="nowrap">
-            <Button
-              size="compact-sm"
-              variant="default"
-              leftSection={<IconArrowLeft size={14} />}
-              disabled={!canOlder}
-              onClick={() => onIndexChange(index + 1)}
-            >
-              Older
-            </Button>
-            <Text size="sm" fw={600}>
-              {summaryTestName(reading)}{' '}
-              <Text span size="sm" c="dimmed" fw={400}>
-                · {total - index} of {total}
-              </Text>
-            </Text>
-            <Button
-              size="compact-sm"
-              variant="default"
-              rightSection={<IconArrowRight size={14} />}
-              disabled={!canNewer}
-              onClick={() => onIndexChange(index - 1)}
-            >
-              Newer
-            </Button>
-          </Group>
-          <Group className="lab-preview-reading" gap="md">
-            <Text size="sm">
-              <Text span fw={700} size="lg">
-                {displayValue(reading)}
-              </Text>{' '}
-              {reading.unit} <StatusFlag status={reading.status} />
-            </Text>
-            <Text size="sm" c="dimmed">
-              Reference {displayReference(reading)}
-            </Text>
-            {page && (
-              <Text size="sm" c="dimmed">
-                Page {page}
-              </Text>
-            )}
-            {reading.test_name !== summaryTestName(reading) && (
-              <Text size="xs" c="dimmed">
-                {`Report label: "${reading.test_name}"`}
-              </Text>
-            )}
-          </Group>
-          {files.length > 1 && (
-            <Select
-              size="xs"
-              mb="xs"
-              aria-label="Attached file"
-              allowDeselect={false}
-              value={String(file.id)}
-              onChange={setChosen}
-              data={files.map(f => ({
-                value: String(f.id),
-                label: f.file_name,
-              }))}
-            />
-          )}
-          <div className="lab-preview-document">
-            {loading ? (
-              <Group justify="center" py="xl">
-                <Loader size="sm" aria-label="Loading report" />
-              </Group>
-            ) : error ? (
-              <Text size="sm" c="dimmed">
-                The report file couldn’t be loaded. Try again, or open the lab
-                result.
-              </Text>
-            ) : file ? (
-              <FileView key={`${file.id}:${page}`} file={file} page={page} />
-            ) : (
-              <Stack align="center" gap="xs" py="xl">
-                <IconFileText size={28} />
-                <Text size="sm" c="dimmed">
-                  No file is attached to this report.
-                </Text>
-              </Stack>
-            )}
-          </div>
-          <Group className="lab-preview-footer" gap="xs">
-            {file && (
-              <Button
-                component="a"
-                href={`${apiService.getEntityFileViewUrl(file.id)}${page ? `#page=${page}` : ''}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                size="compact-sm"
-                variant="default"
-                leftSection={<IconExternalLink size={14} />}
-              >
-                Open in new tab
-              </Button>
-            )}
-            <Button
-              component={Link}
-              to={buildEntityUrl(ENTITY_TYPES.LAB_RESULT, labResultId, {
-                autoOpen: true,
-              })}
-              size="compact-sm"
-              variant="default"
-            >
-              Open lab result
-            </Button>
-          </Group>
-        </>
-      )}
-    </Drawer>
+        )}
+      </div>
+      <Group className="lab-preview-footer" gap="xs">
+        {file && (
+          <Button
+            component="a"
+            href={`${apiService.getEntityFileViewUrl(file.id)}${page ? `#page=${page}` : ''}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            size="compact-sm"
+            variant="default"
+            leftSection={<IconExternalLink size={14} />}
+          >
+            Open in new tab
+          </Button>
+        )}
+        <Button
+          component={Link}
+          to={buildEntityUrl(ENTITY_TYPES.LAB_RESULT, labResultId, {
+            autoOpen: true,
+          })}
+          size="compact-sm"
+          variant="default"
+        >
+          Open lab result
+        </Button>
+      </Group>
+    </div>
   );
 }

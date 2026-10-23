@@ -1,11 +1,5 @@
-import { Button, Paper, Table, Text, UnstyledButton } from '@mantine/core';
-import {
-  IconAlertTriangle,
-  IconArrowDown,
-  IconArrowUp,
-  IconChevronRight,
-  IconEye,
-} from '@tabler/icons-react';
+import { Button, Drawer, Stack, Table, Text } from '@mantine/core';
+import { IconEye } from '@tabler/icons-react';
 import {
   CartesianGrid,
   Line,
@@ -17,100 +11,13 @@ import {
   YAxis,
 } from 'recharts';
 import {
-  OVERVIEW_GROUPS,
-  displayChange,
-  displayPercent,
   displayReference,
   displayValue,
-  isFlagged,
   observationDate,
   summaryTestName,
 } from '../../utils/labOverview';
-
-const FLAG_ICONS = { high: IconArrowUp, low: IconArrowDown };
-
-export function StatusFlag({ status }) {
-  if (!status || status === 'normal') return null;
-  const flagged = isFlagged({ status });
-  const Icon = FLAG_ICONS[status] || IconAlertTriangle;
-  return (
-    <span
-      className="lab-status"
-      data-severity={
-        status === 'critical' ? 'critical' : flagged ? 'flag' : 'info'
-      }
-    >
-      {flagged && <Icon size={13} stroke={2.2} aria-hidden />}
-      {status.charAt(0).toUpperCase() + status.slice(1)}
-    </span>
-  );
-}
-
-function Sparkline({ rows }) {
-  const width = 96;
-  const height = 26;
-  const pad = 3;
-  if (rows.length < 2) return <span className="lab-sparkline" aria-hidden />;
-  const values = rows.map(row => row.value);
-  const lo = Math.min(...values);
-  const span = Math.max(...values) - lo || 1;
-  const x = i => pad + (i * (width - 2 * pad)) / (values.length - 1);
-  const y = v => height - pad - ((v - lo) / span) * (height - 2 * pad);
-  const last = values.length - 1;
-  return (
-    <svg
-      className="lab-sparkline"
-      width={width}
-      height={height}
-      viewBox={`0 0 ${width} ${height}`}
-      aria-hidden
-    >
-      <path
-        d={values
-          .map(
-            (v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`
-          )
-          .join('')}
-        fill="none"
-        stroke="var(--mantine-color-blue-6)"
-        strokeOpacity={0.55}
-        strokeWidth={1.5}
-        strokeLinejoin="round"
-        strokeLinecap="round"
-      />
-      <circle
-        cx={x(last)}
-        cy={y(values[last])}
-        r={3}
-        fill="var(--mantine-color-blue-6)"
-        stroke="var(--mantine-color-body)"
-        strokeWidth={1.5}
-      />
-    </svg>
-  );
-}
-
-function ChangeSummary({ metric, dateLabel }) {
-  const { comparison, latest } = metric;
-  if (!comparison)
-    return (
-      <span className="lab-metric-when">
-        {metric.readings.length > 1
-          ? 'No comparable earlier reading'
-          : 'First reading'}
-      </span>
-    );
-  return (
-    <>
-      {displayChange(comparison.change)} {latest.unit}
-      {comparison.percent !== null &&
-        ` (${displayPercent(comparison.percent)})`}
-      <span className="lab-metric-when">
-        vs {dateLabel(observationDate(comparison.previous))}
-      </span>
-    </>
-  );
-}
+import ReportPreview from './ReportPreview';
+import StatusFlag from './StatusFlag';
 
 function HistoryChart({ metric, dateLabel, onPreview }) {
   const { latest, chartRows } = metric;
@@ -203,12 +110,12 @@ function HistoryChart({ metric, dateLabel, onPreview }) {
   );
 }
 
-function MetricDetail({ id, metric, reports, dateLabel, onPreview }) {
+function TestHistory({ metric, reports, dateLabel, onPreview }) {
   const { latest, readings, otherUnits } = metric;
   const reportName = row =>
     reports.find(report => report.id === row.lab_result_id)?.test_name;
   return (
-    <div className="lab-metric-detail" id={id}>
+    <div className="lab-test-history">
       <div>
         <HistoryChart
           metric={metric}
@@ -277,97 +184,55 @@ function MetricDetail({ id, metric, reports, dateLabel, onPreview }) {
   );
 }
 
-function MetricRow({
+// One panel per test: its history, and the original report for any reading.
+export default function TestDrawer({
   metric,
-  expanded,
-  onToggle,
+  previewIndex,
   onPreview,
+  onClose,
   reports,
   dateLabel,
 }) {
-  const { latest } = metric;
-  const detailId = `lab-metric-${metric.key.replace(/[^a-z0-9]+/gi, '-')}`;
+  const latest = metric?.latest;
   return (
-    <div className="lab-metric">
-      <UnstyledButton
-        className="lab-metric-row"
-        aria-expanded={expanded}
-        aria-controls={expanded ? detailId : undefined}
-        onClick={onToggle}
-      >
-        <span className="lab-metric-name">
-          <span className="lab-metric-title">{summaryTestName(latest)}</span>
-          <span className="lab-metric-when">
-            {metric.readings.length}{' '}
-            {metric.readings.length === 1 ? 'reading' : 'readings'} ·{' '}
-            {dateLabel(observationDate(latest))}
-          </span>
-        </span>
-        <span className="lab-metric-value">
-          <span className="lab-metric-number">{displayValue(latest)}</span>
-          {latest.unit && (
-            <span className="lab-metric-unit">{latest.unit}</span>
-          )}
-          <StatusFlag status={latest.status} />
-        </span>
-        <Sparkline rows={metric.chartRows} />
-        <span className="lab-metric-change">
-          <ChangeSummary metric={metric} dateLabel={dateLabel} />
-        </span>
-        <IconChevronRight
-          className="lab-metric-chevron"
-          size={16}
-          aria-hidden
-        />
-      </UnstyledButton>
-      {expanded && (
-        <MetricDetail
-          id={detailId}
-          metric={metric}
-          reports={reports}
-          dateLabel={dateLabel}
-          onPreview={onPreview}
-        />
-      )}
-    </div>
-  );
-}
-
-export default function LabMetricList({
-  metrics,
-  grouped,
-  expanded,
-  onToggle,
-  onPreview,
-  reports,
-  dateLabel,
-}) {
-  const row = metric => (
-    <MetricRow
-      key={metric.key}
-      metric={metric}
-      expanded={expanded.has(metric.key)}
-      onToggle={() => onToggle(metric.key)}
-      onPreview={index => onPreview(metric.key, index)}
-      reports={reports}
-      dateLabel={dateLabel}
-    />
-  );
-  return (
-    <Paper withBorder radius="md" className="lab-metric-list">
-      {grouped
-        ? OVERVIEW_GROUPS.map(group => {
-            const items = metrics.filter(metric => metric.group === group.id);
-            return (
-              items.length > 0 && (
-                <section key={group.id} aria-label={group.title}>
-                  <div className="lab-group-label">{group.title}</div>
-                  {items.map(row)}
-                </section>
-              )
-            );
-          })
-        : metrics.map(row)}
-    </Paper>
+    <Drawer
+      opened={!!metric}
+      onClose={onClose}
+      position="right"
+      size="xl"
+      title={
+        latest && (
+          <Stack gap={0}>
+            <Text fw={700} size="lg">
+              {summaryTestName(latest)}
+            </Text>
+            <Text size="sm" c="dimmed">
+              Latest {displayValue(latest)} {latest.unit} ·{' '}
+              {dateLabel(observationDate(latest))}
+            </Text>
+          </Stack>
+        )
+      }
+      classNames={{ body: 'lab-drawer-body' }}
+    >
+      {metric &&
+        (previewIndex === null ? (
+          <TestHistory
+            metric={metric}
+            reports={reports}
+            dateLabel={dateLabel}
+            onPreview={onPreview}
+          />
+        ) : (
+          <ReportPreview
+            metric={metric}
+            index={previewIndex}
+            onIndexChange={onPreview}
+            onBack={() => onPreview(null)}
+            reports={reports}
+            dateLabel={dateLabel}
+          />
+        ))}
+    </Drawer>
   );
 }

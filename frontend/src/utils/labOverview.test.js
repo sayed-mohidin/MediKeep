@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   buildMetrics,
   filterMetrics,
-  sortMetrics,
+  orderForCard,
   hasChanged,
   groupForTest,
   displayValue,
@@ -160,6 +160,9 @@ describe('lab overview grouping', () => {
     expect(groupForTest(row('T4'))).toBe('thyroid');
     expect(groupForTest(row('Vitamin B12'))).toBe('vitamins');
     expect(groupForTest(row('Absolute Neutrophil Count'))).toBe('blood');
+    expect(groupForTest(row('Neutrophils'))).toBe('blood');
+    expect(groupForTest(row('Lymphocytes'))).toBe('blood');
+    expect(groupForTest(row('Total Leucocytes Count (WBC)'))).toBe('blood');
     expect(groupForTest(row('Creatinine'))).toBe('kidney');
     expect(groupForTest(row('ALT (SGPT)'))).toBe('liver');
     expect(groupForTest(row('LDL/HDL Ratio'))).toBe('lipids');
@@ -273,9 +276,12 @@ describe('lab overview filtering', () => {
     ]);
     expect(filterMetrics(metrics, { filter: 'glucose' })).toHaveLength(2);
   });
-  it('sorts by flag and by size of change', () => {
-    expect(names(sortMetrics(metrics, 'flagged'))[0]).toBe('HbA1c');
-    expect(names(sortMetrics(metrics, 'change'))[0]).toBe('LDL Cholesterol');
+  it('orders a card by flag, then notable change, then name', () => {
+    expect(names(orderForCard([...metrics].reverse()))).toEqual([
+      'HbA1c',
+      'LDL Cholesterol',
+      'Glycosilated Haemoglobin HbA1c',
+    ]);
   });
 });
 describe('focused navigation', () => {

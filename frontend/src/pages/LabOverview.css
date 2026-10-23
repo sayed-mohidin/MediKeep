@@ -1,88 +1,96 @@
+.lab-toolbar {
+  justify-content: space-between;
+}
 .lab-search {
   flex: 1 1 260px;
 }
+.lab-legend svg {
+  vertical-align: -2px;
+}
 
-/* Metric list */
-.lab-metric-list {
-  overflow: hidden;
+/* Category cards */
+/* Two flowing columns so short cards don't leave gaps beside long ones. */
+.lab-card-grid {
+  columns: 2;
+  column-gap: 14px;
 }
-.lab-group-label {
-  padding: 12px 16px 6px;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--mantine-color-dimmed);
+.lab-card {
+  break-inside: avoid;
+  margin-bottom: 14px;
+  padding: 14px 6px 8px;
 }
-section + section .lab-group-label {
-  border-top: 1px solid var(--color-border-light);
+.lab-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 0 10px 8px;
 }
-.lab-metric + .lab-metric {
-  border-top: 1px solid var(--color-border-light);
-}
-.lab-metric-row {
+.lab-test-row {
   display: grid;
-  grid-template-columns:
-    minmax(150px, 1.4fr) minmax(120px, 1fr) 96px minmax(140px, 1fr)
-    16px;
+  grid-template-columns: minmax(0, 1fr) auto 56px 16px;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   width: 100%;
-  padding: 10px 16px;
+  padding: 8px 10px;
+  border-radius: var(--mantine-radius-sm);
   text-align: left;
 }
-.lab-metric-row:hover,
-.lab-metric-row[aria-expanded='true'] {
+.lab-card-rows .lab-test-row + .lab-test-row {
+  border-top: 1px solid var(--color-border-light);
+}
+.lab-test-row:hover {
   background: var(--mantine-color-default-hover);
 }
-.lab-metric-row:focus-visible {
+.lab-test-row:focus-visible {
   outline: 2px solid var(--mantine-primary-color-filled);
   outline-offset: -2px;
 }
-.lab-metric-name,
-.lab-metric-change {
+.lab-test-name {
   display: flex;
   flex-direction: column;
-  min-width: 0;
-}
-.lab-metric-title {
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 500;
   overflow-wrap: anywhere;
 }
-.lab-metric-when {
-  font-size: 12px;
+.lab-test-date {
+  font-size: 11px;
+  font-weight: 400;
   color: var(--mantine-color-dimmed);
 }
-.lab-metric-value {
+.lab-test-value {
   display: flex;
   align-items: baseline;
+  justify-content: flex-end;
   flex-wrap: wrap;
-  gap: 3px 4px;
+  gap: 2px 4px;
+  font-variant-numeric: tabular-nums;
 }
-.lab-metric-number {
-  font-size: 16px;
+.lab-test-number {
   font-weight: 650;
 }
-.lab-metric-unit {
+.lab-test-unit {
   font-size: 12px;
   color: var(--mantine-color-dimmed);
 }
-.lab-metric-change {
-  font-size: 13px;
+.lab-change {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  font-size: 12px;
+  color: var(--mantine-color-dimmed);
   font-variant-numeric: tabular-nums;
+}
+.lab-change[data-changed] {
+  color: var(--mantine-color-text);
+  font-weight: 600;
+}
+.lab-test-chevron {
   color: var(--mantine-color-dimmed);
 }
-.lab-metric-chevron {
-  color: var(--mantine-color-dimmed);
-  transition: transform 0.15s;
-}
-.lab-metric-row[aria-expanded='true'] .lab-metric-chevron {
-  transform: rotate(90deg);
-}
-.lab-sparkline {
-  display: block;
-  width: 96px;
-  height: 26px;
+.lab-card-more {
+  margin: 4px 0 0 4px;
 }
 
 /* Status flags carry an icon and a label, never colour alone. */
@@ -103,13 +111,16 @@ section + section .lab-group-label {
   color: var(--mantine-color-red-6);
 }
 
-/* Expanded detail */
-.lab-metric-detail {
-  display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
-  gap: 20px;
-  padding: 14px 16px 18px;
-  border-top: 1px solid var(--color-border-light);
+/* Test panel */
+.lab-drawer-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.lab-test-history {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 .lab-chart-legend {
   display: flex;
@@ -142,12 +153,12 @@ section + section .lab-group-label {
   font-weight: 600;
 }
 
-/* Report preview drawer */
-.lab-preview-body {
+/* Report preview inside the test panel */
+.lab-preview {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  height: calc(100% - 60px);
+  height: calc(100vh - 120px);
 }
 .lab-preview-stepper {
   justify-content: space-between;
@@ -174,19 +185,12 @@ section + section .lab-group-label {
 }
 
 @media (max-width: 820px) {
-  .lab-metric-detail {
-    grid-template-columns: 1fr;
+  .lab-card-grid {
+    columns: 1;
   }
 }
 @media (max-width: 600px) {
-  .lab-metric-row {
-    grid-template-columns: 1fr auto 16px;
-  }
   .lab-hide-narrow {
-    display: none;
-  }
-  .lab-metric-row .lab-sparkline,
-  .lab-metric-row .lab-metric-change {
     display: none;
   }
 }

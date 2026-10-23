@@ -86,7 +86,16 @@ function fixture() {
     error: null,
   };
 }
-const row = name => screen.getByRole('button', { name: new RegExp(name) });
+const row = name =>
+  screen.getByRole('button', { name: `Open ${name} history` });
+const openTest = async name => {
+  fireEvent.click(row(name));
+  return screen.findByRole('dialog');
+};
+const previewFrom = (panel, date) =>
+  fireEvent.click(
+    within(panel).getByRole('button', { name: `Preview report from ${date}` })
+  );
 beforeEach(() => {
   mocks.patient = { id: 10 };
   mocks.data = fixture();
@@ -95,38 +104,62 @@ beforeEach(() => {
     { id: 50, file_name: 'report.pdf', file_type: 'application/pdf' },
   ]);
 });
-describe('health overview list', () => {
-  it('shows every test as a row and expands its history in place', () => {
+describe('health overview cards', () => {
+  it('separates tests into category cards and opens a test in one panel', async () => {
     render(<Dashboard />, { wrapper });
+    const liver = screen.getByRole('region', { name: 'Liver markers' });
+    expect(within(liver).getByText('ALT')).toBeInTheDocument();
+    expect(within(liver).getByText('1 test · 2024-01-02')).toBeInTheDocument();
     expect(
-      screen.getByRole('region', { name: 'Liver markers' })
+      screen.getByRole('region', { name: 'Other tests' })
     ).toBeInTheDocument();
     expect(screen.queryByText('0 - 30')).not.toBeInTheDocument();
-    fireEvent.click(row('ALT'));
-    expect(row('ALT')).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getByText('0 - 30')).toBeInTheDocument();
-    expect(screen.getByText('January panel')).toBeInTheDocument();
+    const panel = await openTest('ALT');
+    expect(within(panel).getByText('0 - 30')).toBeInTheDocument();
+    expect(within(panel).getByText('January panel')).toBeInTheDocument();
   });
-  it('shows unfamiliar tests, zeros and unspecified dates without inventing statuses', () => {
+  it('shows unfamiliar tests, zeros and unspecified dates without inventing statuses', async () => {
     render(<Dashboard />, { wrapper });
-    fireEvent.click(row('Novel assay'));
-    expect(screen.getByText('Not provided')).toBeInTheDocument();
-    expect(screen.getAllByText(/Date not recorded/).length).toBeGreaterThan(0);
+    const panel = await openTest('Novel assay');
+    expect(within(panel).getByText('Not provided')).toBeInTheDocument();
+    expect(
+      within(panel).getAllByText(/Date not recorded/).length
+    ).toBeGreaterThan(0);
     expect(screen.queryByText('Normal')).not.toBeInTheDocument();
   });
-  it('shows the change since the previous reading in the same unit only', () => {
+  it('shows the change since the previous reading in the same unit only', async () => {
     mocks.data.components = [
       alt(),
       alt({ id: 3, lab_result_id: 41, value: 8, completed_date: '2023-12-01' }),
       alt({ id: 4, value: 900, unit: 'mg/dL', completed_date: '2023-12-20' }),
     ];
     render(<Dashboard />, { wrapper });
+    expect(within(row('ALT')).getByText('+25%')).toBeInTheDocument();
+    const panel = await openTest('ALT');
     expect(
-      within(row('ALT')).getByText(/\+2 U\/L \(\+25%\)/)
+      within(panel).getByText(/Also recorded in mg\/dL/)
     ).toBeInTheDocument();
-    expect(within(row('ALT')).getByText('vs 2023-12-01')).toBeInTheDocument();
-    fireEvent.click(row('ALT'));
-    expect(screen.getByText(/Also recorded in mg\/dL/)).toBeInTheDocument();
+  });
+  it('shows only the most relevant rows of a long card until expanded', () => {
+    mocks.data.components = Array.from({ length: 7 }, (_, i) =>
+      alt({
+        id: i + 1,
+        test_name: `Liver enzyme ${i + 1}`,
+        status: i === 6 ? 'high' : 'normal',
+      })
+    ).map(item => ({ ...item, test_name: `Bilirubin ${item.id}` }));
+    render(<Dashboard />, { wrapper });
+    const liver = screen.getByRole('region', { name: 'Liver markers' });
+    expect(
+      within(liver).getAllByRole('button', { name: /^Open/ })
+    ).toHaveLength(5);
+    expect(
+      within(liver).getByRole('button', { name: 'Open Bilirubin 7 history' })
+    ).toBeInTheDocument();
+    fireEvent.click(within(liver).getByRole('button', { name: 'Show all 7' }));
+    expect(
+      within(liver).getAllByRole('button', { name: /^Open/ })
+    ).toHaveLength(7);
   });
   it('filters with search and chips, and offers a way back from no results', () => {
     mocks.data.components = [
@@ -143,7 +176,7 @@ describe('health overview list', () => {
     fireEvent.click(screen.getByRole('button', { name: /Flagged/ }));
     expect(row('ALT')).toBeInTheDocument();
     expect(
-      screen.queryByRole('button', { name: /Vitamin B12/ })
+      screen.queryByRole('region', { name: 'Vitamins' })
     ).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Search tests'), {
       target: { value: 'b12' },
@@ -155,7 +188,7 @@ describe('health overview list', () => {
     expect(row('Vitamin B12')).toBeInTheDocument();
     expect(row('ALT')).toBeInTheDocument();
   });
-  it('merges the two vitamin D labels into one row and keeps each report label', () => {
+  it('merges the two vitamin D labels into one test and keeps each report label', async () => {
     const base = { lab_result_id: 40, unit: 'ng/ml', status: null };
     mocks.data.components = [
       {
@@ -181,46 +214,41 @@ describe('health overview list', () => {
       },
     ];
     render(<Dashboard />, { wrapper });
+    expect(screen.getAllByRole('button', { name: /Vitamin D/ })).toHaveLength(
+      1
+    );
+    const panel = await openTest('Vitamin D (25-OH)');
     expect(
-      screen.getAllByRole('button', { name: /Vitamin D \(25-OH\)/ })
-    ).toHaveLength(1);
-    fireEvent.click(row('Vitamin D \\(25-OH\\)'));
-    expect(
-      screen.getAllByRole('button', { name: /Preview report/ })
+      within(panel).getAllByRole('button', { name: /Preview report/ })
     ).toHaveLength(3);
-    expect(screen.getByText('777 ng/ml')).toBeInTheDocument();
+    expect(within(panel).getByText('777 ng/ml')).toBeInTheDocument();
   });
-  it('previews the original report and steps to older readings', async () => {
+  it('previews the original report on its page, steps to older readings and returns', async () => {
     mocks.data.components = [
       alt({ notes: 'Source: Paperless document 81, page 2. Checked.' }),
       alt({ id: 3, lab_result_id: 41, value: 8, completed_date: '2023-12-01' }),
     ];
     render(<Dashboard />, { wrapper });
-    fireEvent.click(row('ALT'));
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Preview report from 2024-01-02' })
-    );
-    const drawer = await screen.findByRole('dialog');
-    expect(within(drawer).getByText('January panel')).toBeInTheDocument();
-    expect(within(drawer).getByText('· 2 of 2')).toBeInTheDocument();
-    const frame = await within(drawer).findByTitle('report.pdf');
+    const panel = await openTest('ALT');
+    previewFrom(panel, '2024-01-02');
+    expect(within(panel).getByText(/January panel/)).toBeInTheDocument();
+    expect(within(panel).getByText('· 2 of 2')).toBeInTheDocument();
+    expect(within(panel).getByText('Page 2')).toBeInTheDocument();
+    const frame = await within(panel).findByTitle('report.pdf');
     expect(frame).toHaveAttribute(
       'src',
       '/api/v1/entity-files/files/50/view#page=2'
     );
-    expect(within(drawer).getByText('Page 2')).toBeInTheDocument();
     expect(mocks.getFiles).toHaveBeenCalledWith(
       'lab-result',
       40,
       expect.any(AbortSignal)
     );
-    fireEvent.click(within(drawer).getByRole('button', { name: 'Older' }));
+    fireEvent.click(within(panel).getByRole('button', { name: 'Older' }));
     expect(
-      await within(drawer).findByText('December panel')
+      await within(panel).findByText(/December panel/)
     ).toBeInTheDocument();
-    expect(
-      within(drawer).getByRole('button', { name: 'Older' })
-    ).toBeDisabled();
+    expect(within(panel).getByRole('button', { name: 'Older' })).toBeDisabled();
     await waitFor(() =>
       expect(mocks.getFiles).toHaveBeenCalledWith(
         'lab-result',
@@ -228,6 +256,12 @@ describe('health overview list', () => {
         expect.any(AbortSignal)
       )
     );
+    fireEvent.click(
+      within(panel).getByRole('button', { name: 'Back to history' })
+    );
+    expect(
+      within(panel).getAllByRole('button', { name: /Preview report/ })
+    ).toHaveLength(2);
   });
   it('offers to open the PDF when the browser cannot show it inline', async () => {
     Object.defineProperty(navigator, 'pdfViewerEnabled', {
@@ -239,30 +273,23 @@ describe('health overview list', () => {
         alt({ notes: 'Source: Paperless document 81, page 3.' }),
       ];
       render(<Dashboard />, { wrapper });
-      fireEvent.click(row('ALT'));
-      fireEvent.click(
-        screen.getByRole('button', { name: 'Preview report from 2024-01-02' })
-      );
-      const drawer = await screen.findByRole('dialog');
-      const open = await within(drawer).findByRole('link', {
+      const panel = await openTest('ALT');
+      previewFrom(panel, '2024-01-02');
+      const open = await within(panel).findByRole('link', {
         name: 'Open report.pdf (page 3)',
       });
       expect(open).toHaveAttribute(
         'href',
         '/api/v1/entity-files/files/50/view#page=3'
       );
-      expect(within(drawer).queryByTitle('report.pdf')).not.toBeInTheDocument();
+      expect(within(panel).queryByTitle('report.pdf')).not.toBeInTheDocument();
     } finally {
       delete navigator.pdfViewerEnabled;
     }
   });
-  it('closes details and the preview immediately when the patient changes', async () => {
+  it('closes the open test immediately when the patient changes', async () => {
     const view = render(<Dashboard />, { wrapper });
-    fireEvent.click(row('ALT'));
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Preview report from 2024-01-02' })
-    );
-    await screen.findByRole('dialog');
+    await openTest('ALT');
     mocks.patient = { id: 20 };
     mocks.data = { ...fixture(), reports: [], components: [], loading: true };
     view.rerender(<Dashboard />);

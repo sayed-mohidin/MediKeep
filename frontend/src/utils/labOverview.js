@@ -143,7 +143,7 @@ export function groupForTest(item) {
     return 'liver';
   if (
     item.category === 'hematology' ||
-    /\b(haemoglobin|hemoglobin|hematocrit|haematocrit|wbc|rbc|platelet|neutrophil|lymphocyte|eosinophil|monocyte|basophil|mcv|mch|mchc|rdw|pdw|p lcr)\b/.test(
+    /\b(haemoglobin|hemoglobin|hematocrit|haematocrit|wbc|rbc|platelets?|neutrophils?|lymphocytes?|eosinophils?|monocytes?|basophils?|leucocytes?|leukocytes?|mcv|mch|mchc|rdw|pdw|p lcr)\b/.test(
       name
     )
   )
@@ -240,18 +240,14 @@ export function filterMetrics(metrics, { query = '', filter = 'all' } = {}) {
 
 const byName = (a, b) =>
   summaryTestName(a.latest).localeCompare(summaryTestName(b.latest));
-const groupRank = metric =>
-  OVERVIEW_GROUPS.findIndex(group => group.id === metric.group);
-export const SORTS = {
-  group: (a, b) => groupRank(a) - groupRank(b) || byName(a, b),
-  flagged: (a, b) => Number(b.flagged) - Number(a.flagged) || byName(a, b),
-  change: (a, b) =>
-    Math.abs(b.comparison?.percent ?? 0) -
-      Math.abs(a.comparison?.percent ?? 0) || byName(a, b),
-  name: byName,
-};
-export const sortMetrics = (metrics, sort = 'group') =>
-  [...metrics].sort(SORTS[sort] || SORTS.group);
+// Within a category card: flagged results first, then notable changes, then A–Z.
+export const orderForCard = metrics =>
+  [...metrics].sort(
+    (a, b) =>
+      Number(b.flagged) - Number(a.flagged) ||
+      Number(hasChanged(b)) - Number(hasChanged(a)) ||
+      byName(a, b)
+  );
 
 // Imported readings record where they were read from, e.g. "Source: Paperless document 81, page 2."
 export function sourcePage(item) {

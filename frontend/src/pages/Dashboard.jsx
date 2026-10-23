@@ -8,7 +8,6 @@ import {
   Group,
   Loader,
   Paper,
-  Select,
   Stack,
   Text,
   TextInput,
@@ -16,8 +15,11 @@ import {
   Tooltip,
 } from '@mantine/core';
 import {
+  IconArrowDown,
+  IconArrowUp,
   IconFlask,
   IconInfoCircle,
+  IconTrendingUp,
   IconRefresh,
   IconSearch,
   IconX,
@@ -25,29 +27,21 @@ import {
 import PageHeader from '../components/layout/PageHeader';
 import PatientSelector from '../components/medical/PatientSelector';
 import InvitationNotifications from '../components/dashboard/InvitationNotifications';
-import LabMetricList from '../components/dashboard/LabMetricList';
-import ReportPreviewDrawer from '../components/dashboard/ReportPreviewDrawer';
+import LabCategoryCards from '../components/dashboard/LabCategoryCards';
+import TestDrawer from '../components/dashboard/TestDrawer';
 import { useCurrentPatient, useCacheManager } from '../hooks/useGlobalData';
 import { useDateFormat } from '../hooks/useDateFormat';
 import { useLabOverview } from '../hooks/useLabOverview';
 import {
-  OVERVIEW_GROUPS,
   buildMetrics,
   filterMetrics,
   hasChanged,
   observationDate,
-  sortMetrics,
 } from '../utils/labOverview';
 import './LabOverview.css';
 
-const SORT_OPTIONS = [
-  { value: 'group', label: 'Group by panel' },
-  { value: 'flagged', label: 'Flagged first' },
-  { value: 'change', label: 'Biggest change' },
-  { value: 'name', label: 'A–Z' },
-];
 const HOW_TO_READ =
-  'Each row shows the latest reading for a test. Flags come from the labels or ranges recorded in the report and are not a clinical assessment. Changes compare against the previous dated reading in the same unit, without rescaling.';
+  'Each card lists the latest reading of every test in that category. Flags come from the labels or ranges recorded in the report and are not a clinical assessment. Changes compare against the previous dated reading in the same unit, without rescaling.';
 
 export default function Dashboard() {
   const {
@@ -62,25 +56,22 @@ export default function Dashboard() {
   const [params, setParams] = useSearchParams();
   const query = params.get('q') || '';
   const filter = params.get('filter') || 'all';
-  const sort = params.get('sort') || 'group';
-  // Expanded rows and the preview belong to one patient and are dropped on switch.
-  const [expanded, setExpanded] = useState({ patientId, keys: new Set() });
-  const [preview, setPreview] = useState(null);
+  // The open test belongs to one patient and is dropped on switch.
+  const [open, setOpen] = useState(null);
 
   const metrics = useMemo(
     () => buildMetrics(data.components),
     [data.components]
   );
   const visible = useMemo(
-    () => sortMetrics(filterMetrics(metrics, { query, filter }), sort),
-    [metrics, query, filter, sort]
+    () => filterMetrics(metrics, { query, filter }),
+    [metrics, query, filter]
   );
-  const expandedKeys =
-    expanded.patientId === patientId ? expanded.keys : new Set();
-  const activePreview = preview?.patientId === patientId ? preview : null;
-  const previewMetric = activePreview
-    ? metrics.find(metric => metric.key === activePreview.key)
+  const activeOpen = open?.patientId === patientId ? open : null;
+  const openMetric = activeOpen
+    ? metrics.find(metric => metric.key === activeOpen.key)
     : null;
+  const filtering = !!query.trim() || filter !== 'all';
   const latestDate = metrics
     .map(metric => observationDate(metric.latest))
     .filter(Boolean)
@@ -103,11 +94,6 @@ export default function Dashboard() {
       label: 'Changed',
       count: metrics.filter(hasChanged).length,
     },
-    ...OVERVIEW_GROUPS.map(group => ({
-      id: group.id,
-      label: group.title,
-      count: metrics.filter(m => m.group === group.id).length,
-    })).filter(chip => chip.count > 0),
   ];
 
   function setParam(key, value, fallback) {
@@ -132,20 +118,13 @@ export default function Dashboard() {
       { replace: true }
     );
   }
-  function toggle(key) {
-    const keys = new Set(expandedKeys);
-    if (keys.has(key)) keys.delete(key);
-    else keys.add(key);
-    setExpanded({ patientId, keys });
-  }
-  const changePreviewIndex = useCallback(
-    index => setPreview(current => current && { ...current, index }),
+  const showPreview = useCallback(
+    index => setOpen(current => current && { ...current, previewIndex: index }),
     []
   );
   function handlePatientChange(nextPatient) {
     // Hide details before requesting the next person's data.
-    setExpanded({ patientId: null, keys: new Set() });
-    setPreview(null);
+    setOpen(null);
     setCurrentPatient(nextPatient);
     invalidateAll();
   }
@@ -234,7 +213,7 @@ export default function Dashboard() {
           </Paper>
         ) : (
           <>
-            <Group gap="xs" wrap="wrap">
+            <Group gap="xs" wrap="wrap" className="lab-toolbar">
               <TextInput
                 className="lab-search"
                 placeholder="Search tests, e.g. HbA1c, LDL, vitamin"
@@ -256,35 +235,33 @@ export default function Dashboard() {
                 value={query}
                 onChange={event => setParam('q', event.currentTarget.value)}
               />
-              <Select
-                aria-label="Sort"
-                data={SORT_OPTIONS}
-                value={sort}
-                onChange={value => setParam('sort', value, 'group')}
-                allowDeselect={false}
-                w={170}
-              />
+              <Group gap={6} role="group" aria-label="Filter tests">
+                {chips.map(chip => (
+                  <Button
+                    key={chip.id}
+                    size="compact-sm"
+                    radius="xl"
+                    variant={filter === chip.id ? 'filled' : 'default'}
+                    color="dark"
+                    aria-pressed={filter === chip.id}
+                    onClick={() => setParam('filter', chip.id, 'all')}
+                    rightSection={
+                      <Text span size="xs" opacity={0.7}>
+                        {chip.count}
+                      </Text>
+                    }
+                  >
+                    {chip.label}
+                  </Button>
+                ))}
+              </Group>
             </Group>
-            <Group gap={6} role="group" aria-label="Filter tests">
-              {chips.map(chip => (
-                <Button
-                  key={chip.id}
-                  size="compact-sm"
-                  radius="xl"
-                  variant={filter === chip.id ? 'filled' : 'default'}
-                  color="dark"
-                  aria-pressed={filter === chip.id}
-                  onClick={() => setParam('filter', chip.id, 'all')}
-                  rightSection={
-                    <Text span size="xs" opacity={0.7}>
-                      {chip.count}
-                    </Text>
-                  }
-                >
-                  {chip.label}
-                </Button>
-              ))}
-            </Group>
+            <Text size="xs" c="dimmed" className="lab-legend">
+              <IconArrowUp size={12} /> High · <IconArrowDown size={12} /> Low,
+              as labelled in the report · <IconTrendingUp size={12} /> change
+              since the previous report · Select a test for its history and
+              original reports
+            </Text>
             {data.truncated && (
               <Alert color="yellow">
                 Showing the latest 5,000 readings. Older results remain
@@ -292,15 +269,10 @@ export default function Dashboard() {
               </Alert>
             )}
             {visible.length ? (
-              <LabMetricList
+              <LabCategoryCards
                 metrics={visible}
-                grouped={sort === 'group'}
-                expanded={expandedKeys}
-                onToggle={toggle}
-                onPreview={(key, index) =>
-                  setPreview({ patientId, key, index })
-                }
-                reports={data.reports}
+                showAll={filtering}
+                onOpen={key => setOpen({ patientId, key, previewIndex: null })}
                 dateLabel={dateLabel}
               />
             ) : (
@@ -316,12 +288,12 @@ export default function Dashboard() {
           </>
         )}
       </Stack>
-      <ReportPreviewDrawer
+      <TestDrawer
         key={patientId}
-        metric={previewMetric}
-        index={activePreview?.index ?? 0}
-        onIndexChange={changePreviewIndex}
-        onClose={() => setPreview(null)}
+        metric={openMetric}
+        previewIndex={activeOpen?.previewIndex ?? null}
+        onPreview={showPreview}
+        onClose={() => setOpen(null)}
         reports={data.reports}
         dateLabel={dateLabel}
       />
